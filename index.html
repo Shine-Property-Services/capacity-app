@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shine Capacity Planner</title>
+<style>
+  :root{
+    --navy:#01355d; --navy-2:#02426f; --navy-3:#0a2c47;
+    --teal:#22d8d2; --teal-d:#0fb3ae;
+    --ink:#12212e; --muted:#61748a; --line:#dbe3ec; --line-2:#eef3f8;
+    --bg:#f4f7fa; --card:#ffffff;
+    --hrs-bg:#eef2f7;         /* the "grey" hours column */
+    --warn:#fff4e0; --warn-ink:#a35a00;
+    --over:#ffe9e6; --over-ink:#b3251a;
+    --ok:#e9f9f3;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); font-size:14px;
+  }
+  /* ---------- header ---------- */
+  header{
+    background:linear-gradient(180deg,var(--navy) 0%,var(--navy-3) 100%);
+    color:#fff; padding:14px 20px; display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+    position:sticky; top:0; z-index:60; box-shadow:0 2px 10px rgba(1,53,93,.18);
+  }
+  header h1{font-size:17px; margin:0; font-weight:650; letter-spacing:.2px}
+  header h1 span{color:var(--teal)}
+  .spacer{flex:1}
+  .sync{font-size:12px; color:#b9cde0}
+  .seg{display:flex; background:rgba(255,255,255,.12); border-radius:8px; padding:3px; gap:2px}
+  .seg button{
+    background:transparent; border:0; color:#cfe1f1; padding:5px 12px; border-radius:6px;
+    font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;
+  }
+  .seg button.on{background:var(--teal); color:var(--navy)}
+  .btn{
+    background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); color:#fff;
+    padding:6px 12px; border-radius:7px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;
+  }
+  .btn:hover{background:rgba(255,255,255,.2)}
+  .savestate{font-size:11.5px; font-weight:600; padding:3px 9px; border-radius:20px; white-space:nowrap}
+  .savestate:empty{display:none}
+  .savestate.busy{background:rgba(255,255,255,.16); color:#cfe1f1}
+  .savestate.ok{background:rgba(34,216,210,.22); color:var(--teal)}
+  .savestate.bad{background:rgba(255,120,105,.25); color:#ffb3aa}
+
+  /* ---------- settings bar ---------- */
+  .settings{
+    background:var(--card); border-bottom:1px solid var(--line); padding:12px 20px;
+    display:none; gap:22px; flex-wrap:wrap; align-items:flex-end;
+  }
+  .settings.open{display:flex}
+  .fld{display:flex; flex-direction:column; gap:4px}
+  .fld label{font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); font-weight:700}
+  .fld input[type=number],.fld select{
+    border:1px solid var(--line); border-radius:7px; padding:6px 9px; font-size:13.5px;
+    font-family:inherit; color:var(--ink); background:#fff; min-width:92px;
+  }
+  .fld .hint{font-size:11px; color:var(--muted)}
+  .chk{display:flex; align-items:center; gap:7px; font-size:13px; padding-bottom:7px}
+
+  /* ---------- toolbar ---------- */
+  .toolbar{
+    display:flex; align-items:center; gap:12px; padding:11px 20px;
+    background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap;
+    position:sticky; top:54px; z-index:55;
+  }
+  .nav{display:flex; gap:6px}
+  .nav button{
+    border:1px solid var(--line); background:#fff; border-radius:7px; padding:5px 11px;
+    cursor:pointer; font-size:13px; font-family:inherit; color:var(--navy); font-weight:600;
+  }
+  .nav button:hover{border-color:var(--teal-d); color:var(--teal-d)}
+  .range{font-size:13px; color:var(--muted); font-weight:600}
+  .legend{display:flex; gap:14px; font-size:11.5px; color:var(--muted); align-items:center}
+  .swatch{display:inline-block; width:11px; height:11px; border-radius:3px; margin-right:5px; vertical-align:-1px; border:1px solid var(--line)}
+
+  /* ---------- table ---------- */
+  .wrap{overflow:auto; max-height:calc(100vh - 150px); background:var(--card)}
+  table{border-collapse:separate; border-spacing:0; width:max-content; min-width:100%}
+  th,td{padding:5px 9px; font-size:13px; white-space:nowrap; border-bottom:1px solid var(--line-2)}
+  thead th{
+    position:sticky; background:var(--navy); color:#fff; z-index:30;
+    border-bottom:1px solid var(--navy-2); font-weight:600;
+  }
+  thead tr.r1 th{top:0; height:34px; font-size:12.5px}
+  thead tr.r2 th{top:34px; height:30px; background:var(--navy-2); font-weight:500}
+  thead tr.r3 th{top:64px; height:22px; background:var(--navy-3); font-weight:600; font-size:10.5px;
+                 text-transform:uppercase; letter-spacing:.5px; color:#9fb6cc; text-align:right}
+  thead tr.r3 th.hrs-h{border-left:2px solid var(--navy); color:#cfe1f1}
+  th.tech{text-align:center; border-left:2px solid var(--navy-2)}
+  th.date-h{text-align:left; left:0; z-index:40; min-width:170px}
+  td.date{
+    position:sticky; left:0; background:var(--card); z-index:20; text-align:right;
+    font-weight:600; color:var(--navy); border-right:1px solid var(--line); min-width:170px;
+  }
+  td.num{text-align:right; font-variant-numeric:tabular-nums}
+  td.hrs{background:var(--hrs-bg); border-left:2px solid var(--line)}
+  td.off{background:#c9d2db; color:#c9d2db}      /* not a working day for this tech */
+  td.off.hrs{background:#bfc9d3}
+  /* before a tech started / after they left — hatched so it reads as "not here" */
+  td.notemp{
+    background:repeating-linear-gradient(135deg,#eef2f7 0 5px,#e2e8f0 5px 10px);
+    color:transparent;
+  }
+  td.notemp.hrs{background:repeating-linear-gradient(135deg,#e6ebf2 0 5px,#d9e0e9 5px 10px)}
+  td.zero{color:#b7c2ce}
+  td.over{background:var(--over); color:var(--over-ink); font-weight:700}
+  td.over.hrs{background:#ffdad4}
+  td.conflict{background:var(--warn); color:var(--warn-ink); font-weight:700}
+  td.clickable{cursor:pointer}
+  td.clickable:hover{outline:2px solid var(--teal); outline-offset:-2px}
+  tr.weekend td.date{color:var(--muted)}
+  tr.weekend td:not(.off){background:#fafcfe}
+  tr.weekend td.hrs:not(.off){background:#e9eef4}
+  tr.today td.date{border-left:3px solid var(--teal)}
+  tr.wtot td{background:#dfe7ef; font-weight:700; border-top:1px solid #c3d0dd; border-bottom:1px solid #c3d0dd}
+  tr.wtot td.date{background:var(--navy); color:#fff}
+  tr.wtot td.hrs{background:#d3dde7}
+  tr.mhead td{background:var(--navy-3); color:var(--teal); font-weight:700; letter-spacing:.6px; font-size:12px; text-transform:uppercase}
+  td.tot{border-left:2px solid var(--navy); font-weight:650}
+  .dow{
+    display:inline-block; border:1px solid rgba(255,255,255,.3); border-radius:6px;
+    padding:2px 8px; font-size:11.5px; cursor:pointer; background:rgba(255,255,255,.08); color:#fff;
+    font-family:inherit;
+  }
+  .dow:hover{background:rgba(255,255,255,.2); border-color:var(--teal)}
+  .cap{font-size:11px; color:#9fd9ff; font-weight:500}
+
+  /* ---------- popovers / drawer ---------- */
+  .pop{
+    position:absolute; background:#fff; border:1px solid var(--line); border-radius:10px;
+    box-shadow:0 10px 30px rgba(1,53,93,.22); padding:10px; z-index:200; display:none; min-width:150px;
+  }
+  .pop.open{display:block}
+  .pop label{display:flex; align-items:center; gap:8px; padding:5px 6px; border-radius:6px; font-size:13px; cursor:pointer}
+  .pop label:hover{background:var(--line-2)}
+  .pop .pf{display:flex; gap:6px; margin-top:8px; border-top:1px solid var(--line); padding-top:8px}
+  .pop .pf button{flex:1; border:1px solid var(--line); background:#fff; border-radius:6px; padding:5px; cursor:pointer; font-size:12px; font-family:inherit}
+
+  .backdrop{position:fixed; inset:0; background:rgba(1,53,93,.35); z-index:300; display:none}
+  .backdrop.open{display:block}
+  .drawer{
+    position:fixed; top:0; right:0; height:100%; width:min(560px,94vw); background:#fff; z-index:310;
+    transform:translateX(100%); transition:transform .18s ease; display:flex; flex-direction:column;
+  }
+  .drawer.open{transform:none}
+  .drawer h3{margin:0; font-size:15px}
+  .dhead{background:var(--navy); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px}
+  .dhead .sub{font-size:12px; color:#b9cde0; margin-top:2px}
+  .dbody{overflow:auto; padding:6px 0}
+  .job{padding:12px 18px; border-bottom:1px solid var(--line-2)}
+  .job .t{font-weight:650; color:var(--navy)}
+  .job .m{font-size:12px; color:var(--muted); margin-top:3px; line-height:1.5}
+  .tag{display:inline-block; padding:1px 7px; border-radius:20px; font-size:10.5px; font-weight:700; margin-left:6px; vertical-align:1px}
+  .tag.x{background:#e7f6ff; color:#0a6a97}
+  .tag.r{background:#f2ecff; color:#5b3fa8}
+  .tag.u{background:#fff0e0; color:#a35a00}
+  .job .n{float:right; text-align:right; font-variant-numeric:tabular-nums}
+  .empty{padding:28px 18px; color:var(--muted); text-align:center}
+
+  /* ---------- roster modal ---------- */
+  .modal{
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) scale(.97);
+    width:min(720px,94vw); max-height:88vh; background:#fff; z-index:310; border-radius:12px;
+    box-shadow:0 24px 60px rgba(1,53,93,.3); display:none; flex-direction:column; overflow:hidden;
+  }
+  .modal.open{display:flex; transform:translate(-50%,-50%)}
+  .modal .dhead{border-radius:0}
+  .mbody{overflow:auto; padding:0}
+  table.rtable{width:100%; border-collapse:collapse}
+  table.rtable th{
+    background:var(--line-2); color:var(--muted); font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.5px; text-align:left; padding:8px 14px; position:sticky; top:0;
+  }
+  table.rtable td{padding:8px 14px; border-bottom:1px solid var(--line-2); font-size:13px; white-space:nowrap}
+  table.rtable td.nm{font-weight:600; color:var(--navy)}
+  table.rtable input[type=date]{
+    border:1px solid var(--line); border-radius:6px; padding:4px 7px; font-family:inherit; font-size:12.5px;
+  }
+  .pill{font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:20px}
+  .pill.on{background:var(--ok); color:#0b7a55}
+  .pill.gone{background:#f1f3f6; color:var(--muted)}
+  .pill.soon{background:#e7f6ff; color:#0a6a97}
+  .rbtn{
+    border:1px solid var(--line); background:#fff; border-radius:6px; padding:4px 10px;
+    cursor:pointer; font-family:inherit; font-size:12px; color:var(--navy);
+  }
+  .rbtn:hover{border-color:var(--over-ink); color:var(--over-ink)}
+  .rbtn.undo:hover{border-color:var(--teal-d); color:var(--teal-d)}
+  .addbox{padding:14px; background:#f8fafc; border-top:1px solid var(--line)}
+  .addrow{display:flex; gap:8px; flex-wrap:wrap}
+  .addrow input[type=text]{flex:1; min-width:200px}
+  .addrow input,.addrow select{
+    border:1px solid var(--line); border-radius:7px; padding:7px 9px; font-family:inherit; font-size:13px;
+  }
+  .addrow button{
+    background:var(--navy); color:#fff; border:0; border-radius:7px; padding:7px 16px;
+    font-family:inherit; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .addrow button:hover{background:var(--navy-2)}
+  .hint{font-size:11px; color:var(--muted)}
+  .note{padding:10px 20px; font-size:12px; color:var(--muted); background:#fffdf5; border-bottom:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Shine <span>Capacity Planner</span></h1>
+  <div class="seg" id="unitSeg"></div>
+  <div class="spacer"></div>
+  <div class="sync" id="syncInfo">loading…</div>
+  <span class="savestate" id="saveState"></span>
+  <button class="btn" id="rosterBtn">Technicians</button>
+  <button class="btn" id="cfgBtn">Settings</button>
+</header>
+
+<div class="settings" id="settings">
+  <div class="fld">
+    <label>Hourly rate</label>
+    <input type="number" id="sRate" min="1" step="5">
+    <div class="hint">job subtotal ÷ this = hours</div>
+  </div>
+  <div class="fld">
+    <label>Christmas divisor</label>
+    <input type="number" id="sXdiv" min="1" step="0.5">
+    <div class="hint">lights: subtotal ÷ this ÷ rate</div>
+  </div>
+  <div class="fld">
+    <label>Christmas rule applies to</label>
+    <select id="sXmode">
+      <option value="line">Christmas line items only</option>
+      <option value="job">Whole job, if it has any</option>
+    </select>
+    <div class="hint">mixed jobs (lights + gutters)</div>
+  </div>
+  <div class="fld">
+    <label>Target hours / day</label>
+    <div id="sTargets" style="display:flex; gap:10px"></div>
+    <div class="hint">per location — over this = flagged red</div>
+  </div>
+  <div class="fld">
+    <label>Weeks shown</label>
+    <input type="number" id="sWeeks" min="1" max="30" step="1">
+  </div>
+  <div class="chk"><input type="checkbox" id="sRecur"><label for="sRecur">Include recurring jobs</label></div>
+  <div class="chk"><input type="checkbox" id="sUnassigned"><label for="sUnassigned">Show unassigned column</label></div>
+  <div class="fld">
+    <label>Working days</label>
+    <button id="resetDows" style="border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 11px;cursor:pointer;font-family:inherit;font-size:13px;color:var(--navy)">Re-detect from Jobber</button>
+    <div class="hint">discards your manual edits</div>
+  </div>
+  <div class="fld" style="flex:1; min-width:260px">
+    <label>Not technicians</label>
+    <input type="text" id="sNonTechs" style="border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:13.5px;font-family:inherit;color:var(--ink);width:100%">
+    <div class="hint">no column of their own; their jobs fall into “other staff”</div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <div class="nav">
+    <button id="prevW">‹ Prev</button>
+    <button id="todayW">Today</button>
+    <button id="nextW">Next ›</button>
+  </div>
+  <div class="range" id="rangeLbl"></div>
+  <div class="spacer"></div>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--hrs-bg)"></span>hours</span>
+    <span><span class="swatch" style="background:#fff"></span>$ booked</span>
+    <span><span class="swatch" style="background:#c9d2db"></span>not working</span>
+    <span><span class="swatch" style="background:var(--over)"></span>over target</span>
+    <span><span class="swatch" style="background:var(--warn)"></span>booked on day off</span>
+    <span><span class="swatch" style="background:repeating-linear-gradient(135deg,#eef2f7 0 3px,#e2e8f0 3px 6px)"></span>not employed yet / left</span>
+  </div>
+</div>
+
+<div class="note" id="note" style="display:none"></div>
+
+<div class="wrap"><table id="grid"></table></div>
+
+<div class="pop" id="dowPop"></div>
+<div class="backdrop" id="backdrop"></div>
+
+<div class="modal" id="roster">
+  <div class="dhead">
+    <div style="flex:1"><h3>Technicians</h3>
+      <div class="sub">Add someone new with a start date, or end-date someone who has left</div></div>
+    <button class="btn" id="rClose">Close</button>
+  </div>
+  <div class="mbody">
+    <table class="rtable" id="rTable"></table>
+    <div class="addbox">
+      <div style="font-weight:650;color:var(--navy);margin-bottom:9px">Add a technician</div>
+      <div class="addrow">
+        <input type="text" id="aName" placeholder="Full name, as it appears in Jobber">
+        <select id="aUnit"></select>
+        <input type="date" id="aStart">
+        <button id="aAdd">Add</button>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        The name must match the Jobber user exactly, or their booked jobs won't
+        find their column. They'll show from the start date onward.
+      </div>
+    </div>
+  </div>
+</div>
+<div class="drawer" id="drawer">
+  <div class="dhead">
+    <div style="flex:1"><h3 id="dTitle">Jobs</h3><div class="sub" id="dSub"></div></div>
+    <button class="btn" id="dClose">Close</button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</div>
+
+<script>
+(function(){
+  var p = new URLSearchParams(location.search);
+  var key = p.get('key') || '';
+  if(!key){
+    document.documentElement.innerHTML =
+      '<div style="font-family:system-ui;max-width:380px;margin:16vh auto;background:#fff;padding:32px;border-radius:16px;box-shadow:0 10px 40px rgba(1,53,93,.18);text-align:center">'
+      +'<div style="font-weight:800;font-size:24px;letter-spacing:.12em;color:#01355d">SHI<span style="color:#22d8d2">N</span>E</div>'
+      +'<div style="font-size:11px;font-weight:600;letter-spacing:.18em;color:#6b7480;margin-bottom:14px">CAPACITY PLANNER</div>'
+      +'<p style="color:#6b7480">Add <code>?key=YOUR_PASSCODE</code> to the URL to view the planner.</p></div>';
+    throw 'no key';
+  }
+  window.__CAPACITY_API = 'https://fxutwkandrlmtdjvydal.functions.supabase.co/capacity-board' + '?key=' + encodeURIComponent(key) + '&format=json';
+})();
+</script>
+<script>
+/* =========================================================================
+   Shine Capacity Planner
+   Data: one row per Jobber VISIT (see scripts/capacity-sync.ps1)
+     amt  = this visit's share of the job's PRE-DISCOUNT subtotal
+     x    = the Christmas-lights portion of amt
+     t[]  = techs assigned to the visit
+   Hours are derived here (not in the sync) so the rate, the Christmas
+   divisor and the target are all editable without a re-sync.
+   ========================================================================= */
+
+var DOWS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+var DOWS_S = ['M','T','W','Th','F','S','Su'];
+var LS_CFG = 'shine_cap_cfg', LS_DOW = 'shine_cap_dow';
+
+/* People who get assigned visits in Jobber but aren't truck technicians —
+   their work still counts toward the day, it just doesn't get its own column. */
+var NON_TECHS_DEFAULT = ['Craig MacDonald', 'Jaedyn Johnson', 'Eric Spies', 'Jackson Powell'];
+var OTHER = '(unassigned / other staff)';
+
+var CFG = {
+  rate: 160, xdiv: 2, xmode: 'line', weeks: 6,
+  targets: {},                 /* per location: { 'Victoria': 8, 'Prince George': 8 } */
+  nonTechs: NON_TECHS_DEFAULT.slice(),
+  /* unit: '' = not chosen yet (default to the first location); null = All */
+  recur: true, unassigned: true, unit: '', start: null
+};
+try { var s = JSON.parse(localStorage.getItem(LS_CFG) || '{}'); for (var k in s) CFG[k] = s[k]; } catch (e) {}
+/* migrate the old single target, and repair a stale/missing exclusion list */
+if (typeof CFG.target === 'number' && !Object.keys(CFG.targets || {}).length) {
+  CFG.targets = {}; CFG.__migrate = CFG.target;
+}
+if (!CFG.targets) CFG.targets = {};
+if (!Array.isArray(CFG.nonTechs)) CFG.nonTechs = NON_TECHS_DEFAULT.slice();
+
+function isTech(name){
+  if (name === OTHER) return false;
+  var n = String(name).trim().toLowerCase();
+  for (var i=0; i<CFG.nonTechs.length; i++) {
+    if (String(CFG.nonTechs[i]).trim().toLowerCase() === n) return false;
+  }
+  return true;
+}
+/* ---- roster: manual additions + start/end dates -------------------------
+   Jobber tells us who is assigned to work; it doesn't tell us who started or
+   left when. The roster overlays that: a tech only occupies a column between
+   their start and end date. Work falling outside it moves to "other staff"
+   so day totals never silently lose booked revenue.                        */
+var LS_ROSTER = 'shine_cap_roster';
+var ROSTER = {};
+try { ROSTER = JSON.parse(localStorage.getItem(LS_ROSTER) || '{}'); } catch (e) {}
+function saveRoster(){ try{ localStorage.setItem(LS_ROSTER, JSON.stringify(ROSTER)); }catch(e){} pushShared(); }
+function rosterOf(name){ return ROSTER[name] || {}; }
+function activeOn(name, day){
+  var r = rosterOf(name);
+  if (r.start && day < r.start) return false;
+  if (r.end && day > r.end) return false;
+  return true;
+}
+/* does this tech overlap the visible window at all? */
+function activeInRange(name, firstDay, lastDay){
+  var r = rosterOf(name);
+  if (r.start && r.start > lastDay) return false;
+  if (r.end && r.end < firstDay) return false;
+  return true;
+}
+function unitOfTech(name){
+  var r = rosterOf(name);
+  if (r.unit) return r.unit;
+  var t = (DATA && DATA.techs) || [];
+  for (var i=0; i<t.length; i++) if (t[i].name === name) return t[i].unit;
+  return CFG.unit || null;
+}
+/* everyone who could hold a column: seen in Jobber, or added by hand */
+function allTechNames(){
+  var names = {};
+  ((DATA && DATA.techs) || []).forEach(function(t){ names[t.name] = 1; });
+  Object.keys(ROSTER).forEach(function(n){ names[n] = 1; });
+  return Object.keys(names).filter(isTech).sort();
+}
+function targetFor(name){
+  var u = (name === OTHER) ? (CFG.unit || null) : unitOfTech(name);
+  var v = u ? CFG.targets[u] : null;
+  if (v === null || v === undefined || isNaN(v)) return 8;
+  return +v;
+}
+var DOW = {};
+try { DOW = JSON.parse(localStorage.getItem(LS_DOW) || '{}'); } catch (e) {}
+/* ---- shared vs personal settings ----------------------------------------
+   Hosted, everyone opens the same link, so anything that changes THE NUMBERS
+   (rate, Christmas divisor, targets, who counts as a technician, the roster
+   and working days) is stored server-side and shared. Only where you happen
+   to be looking — which location, which weeks — stays personal.            */
+var SHARED_KEYS = ['rate','xdiv','xmode','targets','nonTechs','recur','unassigned'];
+var API = window.__CAPACITY_API || null;
+function apiUrl(action){
+  if (!API) return null;
+  return API.replace('&format=json','').replace('?format=json','') +
+         (API.indexOf('?') >= 0 ? '' : '?') + '&action=' + action;
+}
+function applyShared(c){
+  if (!c) return;
+  if (c.cfg) SHARED_KEYS.forEach(function(k){ if (c.cfg[k] !== undefined) CFG[k] = c.cfg[k]; });
+  if (c.dow) DOW = c.dow;
+  if (c.roster) ROSTER = c.roster;
+}
+var pushTimer = null, saveEl = null;
+function setSaveState(txt, cls){
+  if (!saveEl) saveEl = document.getElementById('saveState');
+  if (!saveEl) return;
+  saveEl.textContent = txt;
+  saveEl.className = 'savestate ' + (cls || '');
+}
+/* last write wins — fine for a handful of people, and the state is small */
+function pushShared(){
+  if (!API) return;
+  if (pushTimer) clearTimeout(pushTimer);
+  setSaveState('saving…', 'busy');
+  pushTimer = setTimeout(function(){
+    var cfg = {};
+    SHARED_KEYS.forEach(function(k){ cfg[k] = CFG[k]; });
+    fetch(apiUrl('save-config'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cfg: cfg, dow: DOW, roster: ROSTER })
+    }).then(function(r){
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setSaveState('shared with the team', 'ok');
+      setTimeout(function(){ setSaveState('', ''); }, 2500);
+    }).catch(function(e){
+      setSaveState('not saved: ' + e.message, 'bad');
+    });
+  }, 600);
+}
+function saveCfg(){ try{ localStorage.setItem(LS_CFG, JSON.stringify(CFG)); }catch(e){} pushShared(); }
+function saveDow(){ try{ localStorage.setItem(LS_DOW, JSON.stringify(DOW)); }catch(e){} pushShared(); }
+
+var DATA = null, UNITS = [], ROWS = [];
+
+/* ---------------- date helpers (all dates are plain yyyy-mm-dd, no TZ) --- */
+function ymd(d){
+  var m = d.getMonth()+1, day = d.getDate();
+  return d.getFullYear() + '-' + (m<10?'0':'') + m + '-' + (day<10?'0':'') + day;
+}
+function parseYmd(s){ var p = s.split('-'); return new Date(+p[0], +p[1]-1, +p[2]); }
+function addDays(d,n){ var x = new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+function mondayOf(d){ var i = (d.getDay()+6)%7; return addDays(d,-i); }
+function fmtDay(d){
+  return DOWS[(d.getDay()+6)%7] + ' ' + d.getDate() + ' ' +
+    ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ', ' + d.getFullYear();
+}
+function money(n){
+  if (!n) return '$0';
+  return '$' + Math.round(n).toLocaleString('en-CA');
+}
+function hrs(n){ return (Math.round(n*10)/10).toFixed(1); }
+
+/* ---------------- core math -------------------------------------------- */
+/* Hours a visit consumes. Christmas lights bill roughly double per hour, so
+   their portion is divided by CFG.xdiv before converting to hours.        */
+function visitHours(r){
+  var amt = +r.amt || 0, x = +r.x || 0;
+  if (CFG.xmode === 'job') {
+    return x > 0 ? amt / (CFG.xdiv * CFG.rate) : amt / CFG.rate;
+  }
+  return (amt - x) / CFG.rate + x / (CFG.xdiv * CFG.rate);
+}
+/* How a visit's hours land on columns. The crew size used for the split is the
+   ORIGINAL assignee count, so hiding a non-tech doesn't inflate the tech who
+   shared the job with them — the non-tech's share moves to the catch-all. */
+function shareOut(r){
+  var all = r.t || [];
+  var total = visitHours(r);
+  if (!all.length) return [{ name: OTHER, h: total, of: 1 }];
+  var per = total / all.length;
+  var out = [];
+  all.forEach(function(nm){
+    var keep = isTech(nm) && activeOn(nm, r.d);
+    out.push({ name: keep ? nm : OTHER, h: per, of: all.length });
+  });
+  return out;
+}
+
+function activeRows(){
+  return ROWS.filter(function(r){
+    if (CFG.unit && r.u !== CFG.unit) return false;
+    if (!CFG.recur && r.rec) return false;
+    return true;
+  });
+}
+
+/* techName -> {day -> {h, $, jobs[]}} for the visible window */
+function buildGrid(days){
+  var dayset = {}; days.forEach(function(d){ dayset[d] = 1; });
+  var g = {};
+  activeRows().forEach(function(r){
+    if (!dayset[r.d]) return;
+    shareOut(r).forEach(function(p){
+      if (p.name === OTHER && !CFG.unassigned) return;
+      if (!g[p.name]) g[p.name] = {};
+      if (!g[p.name][r.d]) g[p.name][r.d] = { h:0, jobs:[] };
+      g[p.name][r.d].h += p.h;
+      g[p.name][r.d].jobs.push({ r:r, share:1/p.of, h:p.h });
+    });
+  });
+  return g;
+}
+
+/* Which techs to show: everyone with visits in the window, plus anyone the
+   user has set working days for (so a tech with an empty week doesn't vanish) */
+function techList(days){
+  var g = buildGrid(days), names = {};
+  var firstDay = days[0], lastDay = days[days.length-1];
+  Object.keys(g).forEach(function(n){
+    if (n === OTHER) { names[n] = 1; return; }
+    if (isTech(n) && activeInRange(n, firstDay, lastDay)) names[n] = 1;
+  });
+  allTechNames().forEach(function(n){
+    if (CFG.unit && unitOfTech(n) !== CFG.unit) return;
+    if (activeInRange(n, firstDay, lastDay)) names[n] = 1;
+  });
+  if (!CFG.unassigned) delete names[OTHER];
+  var out = Object.keys(names);
+  out.sort(function(a,b){
+    if (a === OTHER) return 1;
+    if (b === OTHER) return -1;
+    return a.localeCompare(b);
+  });
+  return out;
+}
+
+/* Default working days = the weekdays this tech is actually booked on.
+   Measured over RECENT, NON-RECURRING work: far-future weeks contain almost
+   nothing but recurring contracts (Victoria has standing Friday jobs booked
+   out for months), which otherwise makes every Victoria tech look Friday-only.
+   Falls back to the whole window, then Mon-Fri, for anyone new or idle. */
+function countDows(name, sinceDay, untilDay, skipRecur){
+  var cnt = [0,0,0,0,0,0,0], weeks = {};
+  ROWS.forEach(function(r){
+    if ((r.t || []).indexOf(name) < 0) return;
+    if (sinceDay && (r.d < sinceDay || r.d > untilDay)) return;
+    if (skipRecur && r.rec) return;
+    var d = parseYmd(r.d), i = (d.getDay()+6)%7;
+    var wk = ymd(mondayOf(d));
+    if (!weeks[wk]) weeks[wk] = {};
+    if (!weeks[wk][i]) { weeks[wk][i] = 1; cnt[i]++; }
+  });
+  var nWeeks = Object.keys(weeks).length || 1;
+  var mx = Math.max.apply(null, cnt);
+  var on = [];
+  /* a weekday counts if it shows up in a third of the tech's weeks, or is
+     at least half as common as their busiest day (adapts to low volume) */
+  for (var i=0; i<7; i++) {
+    if (!cnt[i]) continue;
+    if (cnt[i]/nWeeks >= 0.34 || cnt[i] >= mx*0.5) on.push(i);
+  }
+  return on;
+}
+function detectDows(name){
+  var today = new Date();
+  var on = countDows(name, ymd(addDays(today,-70)), ymd(today), true);
+  if (!on.length) on = countDows(name, null, null, true);
+  if (!on.length) on = countDows(name, null, null, false);
+  if (!on.length) on = [0,1,2,3,4];
+  return on;
+}
+function dowsOf(name){
+  if (!DOW[name]) { DOW[name] = detectDows(name); }
+  return DOW[name];
+}
+
+/* ---------------- render ------------------------------------------------ */
+function render(){
+  var start = CFG.start ? parseYmd(CFG.start) : mondayOf(new Date());
+  var days = [];
+  for (var i=0; i<CFG.weeks*7; i++) days.push(ymd(addDays(start,i)));
+
+  var techs = techList(days);
+  var g = buildGrid(days);
+  var today = ymd(new Date());
+
+  document.getElementById('rangeLbl').textContent =
+    fmtDay(start).replace(/^\w+ /,'') + '  →  ' + fmtDay(addDays(start, CFG.weeks*7-1)).replace(/^\w+ /,'');
+
+  var t = document.getElementById('grid');
+  var h = '';
+
+  /* --- header: name row + working-days row --- */
+  h += '<thead><tr class="r1"><th class="date-h">Date</th>';
+  techs.forEach(function(n){
+    h += '<th class="tech" colspan="2">' + esc(n) + '</th>';
+  });
+  h += '<th class="tech" colspan="2">TOTAL</th></tr>';
+
+  h += '<tr class="r2"><th class="date-h" style="background:var(--navy-2)">Working days →</th>';
+  techs.forEach(function(n){
+    if (n === OTHER) {
+      h += '<th colspan="2" style="border-left:2px solid var(--navy)"><span class="cap">no truck assigned</span></th>';
+    } else {
+      var on = dowsOf(n);
+      var lbl = on.length ? on.map(function(i){ return DOWS_S[i]; }).join(' ') : '—';
+      h += '<th colspan="2" style="border-left:2px solid var(--navy)">' +
+           '<button class="dow" data-tech="' + esc(n) + '">' + lbl + ' ▾</button></th>';
+    }
+  });
+  h += '<th colspan="2" style="border-left:2px solid var(--navy)"><span class="cap">all techs</span></th></tr>';
+
+  h += '<tr class="r3"><th class="date-h" style="background:var(--navy-3)"></th>';
+  for (var ci = 0; ci <= techs.length; ci++) {
+    h += '<th class="sub hrs-h">Hours</th><th class="sub">$</th>';
+  }
+  h += '</tr></thead><tbody>';
+
+  /* --- body --- */
+  var wkH = {}, wkM = {}, wkTotH = 0, wkTotM = 0, curMonth = '';
+  var nCols = techs.length*2 + 3;
+
+  days.forEach(function(day, idx) {
+    var d = parseYmd(day), dowIdx = (d.getDay()+6)%7;
+
+    if (idx % 7 === 0) {
+      var mLbl = d.toLocaleDateString('en-CA',{month:'long', year:'numeric'});
+      if (mLbl !== curMonth) {
+        curMonth = mLbl;
+        h += '<tr class="mhead"><td colspan="' + nCols + '">' + esc(mLbl) + '</td></tr>';
+      }
+      wkH = {}; wkM = {}; wkTotH = 0; wkTotM = 0;
+    }
+
+    var cls = 'row';
+    if (dowIdx >= 5) cls += ' weekend';
+    if (day === today) cls += ' today';
+    h += '<tr class="' + cls + '"><td class="date">' + fmtDay(d) + '</td>';
+
+    var dayH = 0, dayM = 0;
+    techs.forEach(function(n){
+      var cell = g[n] && g[n][day];
+      /* round to the displayed 0.1 h first, so the $ column always equals
+         the hours you can see × the rate (the sheet works this way) */
+      var hh = cell ? Math.round(cell.h * 10) / 10 : 0;
+      var mm = hh * CFG.rate;
+      dayH += hh; dayM += mm;
+      wkH[n] = (wkH[n]||0) + hh; wkM[n] = (wkM[n]||0) + mm;
+
+      var employed = (n === OTHER) || activeOn(n, day);
+      var working = employed && ((n === OTHER) || dowsOf(n).indexOf(dowIdx) >= 0);
+      var c = '';
+      if (!employed) c = ' notemp';
+      else if (!working && hh === 0) c = ' off';
+      else if (!working && hh > 0) c = ' conflict';
+      else if (targetFor(n) > 0 && hh > targetFor(n)) c = ' over';
+      else if (hh === 0) c = ' zero';
+      var click = hh > 0 ? ' clickable" data-tech="' + esc(n) + '" data-day="' + day + '"' : '"';
+
+      var blank = (c === ' off' || c === ' notemp');
+      h += '<td class="num hrs' + c + click + '>' + (hh ? hrs(hh) : (blank?'':'·')) + '</td>';
+      h += '<td class="num' + c + click + '>' + (mm ? money(mm) : '') + '</td>';
+    });
+    wkTotH += dayH; wkTotM += dayM;
+    h += '<td class="num hrs tot">' + (dayH ? hrs(dayH) : '·') + '</td>';
+    h += '<td class="num tot">' + (dayM ? money(dayM) : '') + '</td></tr>';
+
+    /* weekly total row every Sunday */
+    if (idx % 7 === 6) {
+      h += '<tr class="wtot"><td class="date">Weekly Total</td>';
+      techs.forEach(function(n){
+        h += '<td class="num hrs">' + (wkH[n] ? hrs(wkH[n]) : '·') + '</td>';
+        h += '<td class="num">' + (wkM[n] ? money(wkM[n]) : '') + '</td>';
+      });
+      h += '<td class="num hrs tot">' + (wkTotH ? hrs(wkTotH) : '·') + '</td>';
+      h += '<td class="num tot">' + (wkTotM ? money(wkTotM) : '') + '</td></tr>';
+    }
+  });
+
+  h += '</tbody>';
+  t.innerHTML = h;
+
+  /* wire up */
+  Array.prototype.forEach.call(t.querySelectorAll('.dow'), function(b){
+    b.addEventListener('click', function(e){ openDow(b, b.getAttribute('data-tech')); e.stopPropagation(); });
+  });
+  Array.prototype.forEach.call(t.querySelectorAll('td.clickable'), function(td){
+    td.addEventListener('click', function(){
+      openDrawer(td.getAttribute('data-tech'), td.getAttribute('data-day'), g);
+    });
+  });
+}
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c];
+  });
+}
+
+/* ---------------- working-days popover ---------------------------------- */
+function openDow(anchor, tech){
+  var pop = document.getElementById('dowPop');
+  var on = dowsOf(tech);
+  var html = '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;padding:2px 6px 6px">' + esc(tech) + '</div>';
+  DOWS.forEach(function(d,i){
+    html += '<label><input type="checkbox" data-i="' + i + '"' + (on.indexOf(i)>=0?' checked':'') + '> ' + d + '</label>';
+  });
+  html += '<div class="pf"><button data-set="week">Mon–Fri</button><button data-set="all">All</button><button data-set="none">None</button></div>';
+  pop.innerHTML = html;
+
+  var r = anchor.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(window.innerWidth - 180, r.left + window.scrollX)) + 'px';
+  pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  pop.classList.add('open');
+
+  Array.prototype.forEach.call(pop.querySelectorAll('input'), function(cb){
+    cb.addEventListener('change', function(){
+      var i = +cb.getAttribute('data-i');
+      var cur = dowsOf(tech).slice();
+      var at = cur.indexOf(i);
+      if (cb.checked && at < 0) cur.push(i);
+      if (!cb.checked && at >= 0) cur.splice(at,1);
+      cur.sort(function(a,b){ return a-b; });
+      DOW[tech] = cur; saveDow(); render();
+      var btn = document.querySelector('.dow[data-tech="' + tech.replace(/"/g,'\\"') + '"]');
+      if (btn) openDow(btn, tech);
+    });
+  });
+  Array.prototype.forEach.call(pop.querySelectorAll('.pf button'), function(b){
+    b.addEventListener('click', function(){
+      var v = b.getAttribute('data-set');
+      DOW[tech] = v === 'week' ? [0,1,2,3,4] : (v === 'all' ? [0,1,2,3,4,5,6] : []);
+      saveDow(); render(); pop.classList.remove('open');
+    });
+  });
+}
+document.addEventListener('click', function(e){
+  var pop = document.getElementById('dowPop');
+  if (pop.classList.contains('open') && !pop.contains(e.target)) pop.classList.remove('open');
+});
+
+/* ---------------- job drill-down ---------------------------------------- */
+function openDrawer(tech, day, g){
+  var cell = g[tech] && g[tech][day];
+  if (!cell) return;
+  document.getElementById('dTitle').textContent = tech;
+  /* same 0.1 h rounding as the grid, so the drawer reconciles with the cell */
+  var cellH = Math.round(cell.h * 10) / 10;
+  document.getElementById('dSub').textContent =
+    fmtDay(parseYmd(day)) + ' · ' + hrs(cellH) + ' h · ' + money(cellH * CFG.rate);
+
+  var jobs = cell.jobs.slice().sort(function(a,b){ return b.h - a.h; });
+  var html = '';
+  jobs.forEach(function(j){
+    var r = j.r;
+    var tags = '';
+    if (r.x > 0) tags += '<span class="tag x">Christmas ÷' + CFG.xdiv + '</span>';
+    if (r.rec) tags += '<span class="tag r">recurring</span>';
+    if (!(r.t||[]).length) tags += '<span class="tag u">unassigned</span>';
+    var meta = [];
+    if (r.ad) meta.push(esc(r.ad));
+    if (r.vc > 1) meta.push('job split across ' + r.vc + ' visits (full job ' + money(r.full) + ')');
+    if (j.share < 1) meta.push('shared with ' + Math.round(1/j.share - 1) + ' other tech' + (1/j.share > 2 ? 's' : ''));
+    if (r.disc > 0) meta.push('discount of ' + money(r.disc) + ' excluded');
+    var jh = Math.round(j.h * 10) / 10;
+    html += '<div class="job">' +
+      '<div class="n">' + hrs(jh) + ' h<br><span style="color:var(--muted);font-size:12px">' + money(jh * CFG.rate) + '</span></div>' +
+      '<div class="t">' + esc(r.cl || 'Client') + ' <span style="color:var(--muted);font-weight:400">#' + esc(r.jn) + '</span>' + tags + '</div>' +
+      '<div class="m">' + (r.ti ? esc(r.ti) + '<br>' : '') + meta.join(' · ') + '</div>' +
+      '</div>';
+  });
+  document.getElementById('dBody').innerHTML = html || '<div class="empty">No jobs.</div>';
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('backdrop').classList.add('open');
+}
+function closeDrawer(){
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('backdrop').classList.remove('open');
+}
+document.getElementById('dClose').addEventListener('click', closeDrawer);
+document.getElementById('backdrop').addEventListener('click', function(){ closeDrawer(); closeRoster(); });
+
+/* ---------------- roster manager ---------------------------------------- */
+function renderRoster(){
+  var today = ymd(new Date());
+  var names = allTechNames();
+  var h = '<thead><tr><th>Technician</th><th>Location</th><th>Start date</th><th>End date</th><th>Status</th><th></th></tr></thead><tbody>';
+  if (!names.length) h += '<tr><td colspan="6" class="empty">No technicians yet.</td></tr>';
+  names.forEach(function(n){
+    var r = rosterOf(n);
+    var st, cls;
+    if (r.end && r.end < today) { st = 'Left ' + r.end; cls = 'gone'; }
+    else if (r.start && r.start > today) { st = 'Starts ' + r.start; cls = 'soon'; }
+    else if (r.end) { st = 'Leaving ' + r.end; cls = 'soon'; }
+    else { st = 'Active'; cls = 'on'; }
+    var seen = ((DATA && DATA.techs) || []).some(function(t){ return t.name === n; });
+    h += '<tr>' +
+      '<td class="nm">' + esc(n) + (seen ? '' : ' <span class="hint">(added by hand)</span>') + '</td>' +
+      '<td>' + esc(unitOfTech(n) || '—') + '</td>' +
+      '<td><input type="date" data-n="' + esc(n) + '" data-f="start" value="' + (r.start || '') + '"></td>' +
+      '<td><input type="date" data-n="' + esc(n) + '" data-f="end" value="' + (r.end || '') + '"></td>' +
+      '<td><span class="pill ' + cls + '">' + esc(st) + '</span></td>' +
+      '<td>' + (r.end
+        ? '<button class="rbtn undo" data-undo="' + esc(n) + '">Re-instate</button>'
+        : '<button class="rbtn" data-rm="' + esc(n) + '">Remove…</button>') + '</td>' +
+      '</tr>';
+  });
+  h += '</tbody>';
+  var t = document.getElementById('rTable');
+  t.innerHTML = h;
+
+  Array.prototype.forEach.call(t.querySelectorAll('input[type=date]'), function(el){
+    el.addEventListener('change', function(){
+      var n = el.getAttribute('data-n'), f = el.getAttribute('data-f');
+      if (!ROSTER[n]) ROSTER[n] = {};
+      if (el.value) ROSTER[n][f] = el.value; else delete ROSTER[n][f];
+      saveRoster(); renderRoster(); render();
+    });
+  });
+  /* Remove = ask for the end date (defaults to today), never a hard delete:
+     their past weeks must keep showing the work they actually did. */
+  Array.prototype.forEach.call(t.querySelectorAll('[data-rm]'), function(b){
+    b.addEventListener('click', function(){
+      var n = b.getAttribute('data-rm');
+      var td = b.parentNode;
+      td.innerHTML = '<span style="display:flex;gap:6px;align-items:center">' +
+        '<input type="date" id="rmDate" value="' + today + '">' +
+        '<button class="rbtn" id="rmOk">End</button>' +
+        '<button class="rbtn undo" id="rmNo">Cancel</button></span>';
+      document.getElementById('rmOk').addEventListener('click', function(){
+        var v = document.getElementById('rmDate').value || today;
+        if (!ROSTER[n]) ROSTER[n] = {};
+        ROSTER[n].end = v;
+        if (!ROSTER[n].unit) ROSTER[n].unit = unitOfTech(n);
+        saveRoster(); renderRoster(); render();
+      });
+      document.getElementById('rmNo').addEventListener('click', renderRoster);
+    });
+  });
+  Array.prototype.forEach.call(t.querySelectorAll('[data-undo]'), function(b){
+    b.addEventListener('click', function(){
+      var n = b.getAttribute('data-undo');
+      if (ROSTER[n]) delete ROSTER[n].end;
+      saveRoster(); renderRoster(); render();
+    });
+  });
+}
+function openRoster(){
+  var sel = document.getElementById('aUnit');
+  sel.innerHTML = UNITS.map(function(u){
+    return '<option' + (u === CFG.unit ? ' selected' : '') + '>' + esc(u) + '</option>';
+  }).join('');
+  document.getElementById('aStart').value = ymd(new Date());
+  renderRoster();
+  document.getElementById('roster').classList.add('open');
+  document.getElementById('backdrop').classList.add('open');
+}
+function closeRoster(){
+  document.getElementById('roster').classList.remove('open');
+  document.getElementById('backdrop').classList.remove('open');
+}
+document.getElementById('rosterBtn').addEventListener('click', openRoster);
+document.getElementById('rClose').addEventListener('click', closeRoster);
+document.getElementById('aAdd').addEventListener('click', function(){
+  var nm = document.getElementById('aName').value.trim();
+  if (!nm) { document.getElementById('aName').focus(); return; }
+  ROSTER[nm] = {
+    unit: document.getElementById('aUnit').value,
+    start: document.getElementById('aStart').value || null,
+    manual: true
+  };
+  if (!ROSTER[nm].start) delete ROSTER[nm].start;
+  /* if they were on the not-a-technician list, adding them overrides that */
+  CFG.nonTechs = CFG.nonTechs.filter(function(x){
+    return String(x).trim().toLowerCase() !== nm.toLowerCase();
+  });
+  saveCfg(); saveRoster();
+  document.getElementById('aName').value = '';
+  var nt = document.getElementById('sNonTechs');
+  if (nt) nt.value = CFG.nonTechs.join(', ');
+  renderRoster(); render();
+});
+
+/* ---------------- controls ---------------------------------------------- */
+function bindNum(id, key){
+  var el = document.getElementById(id);
+  el.value = CFG[key];
+  el.addEventListener('change', function(){
+    var v = parseFloat(el.value);
+    if (isNaN(v)) { el.value = CFG[key]; return; }
+    CFG[key] = v; saveCfg(); render();
+  });
+}
+function bindChk(id, key){
+  var el = document.getElementById(id);
+  el.checked = !!CFG[key];
+  el.addEventListener('change', function(){ CFG[key] = el.checked; saveCfg(); render(); });
+}
+document.getElementById('cfgBtn').addEventListener('click', function(){
+  document.getElementById('settings').classList.toggle('open');
+});
+document.getElementById('prevW').addEventListener('click', function(){ shift(-7); });
+document.getElementById('nextW').addEventListener('click', function(){ shift(7); });
+document.getElementById('todayW').addEventListener('click', function(){
+  CFG.start = ymd(mondayOf(new Date())); saveCfg(); render();
+});
+function shift(n){
+  var s = CFG.start ? parseYmd(CFG.start) : mondayOf(new Date());
+  CFG.start = ymd(addDays(s,n)); saveCfg(); render();
+}
+document.getElementById('resetDows').addEventListener('click', function(){
+  DOW = {}; saveDow(); render();
+});
+
+/* ---------------- boot --------------------------------------------------- */
+function boot(data){
+  DATA = data;
+  ROWS = data.rows || [];
+  /* shared settings from the server win over whatever this browser had cached */
+  applyShared(data.config);
+  var us = {};
+  ROWS.forEach(function(r){ us[r.u] = 1; });
+  UNITS = Object.keys(us).sort();
+  if (CFG.unit && UNITS.indexOf(CFG.unit) < 0) CFG.unit = '';
+  if (CFG.unit === '' && UNITS.length) CFG.unit = UNITS[0];
+
+  var seg = document.getElementById('unitSeg');
+  var segHtml = '';
+  UNITS.forEach(function(u){
+    segHtml += '<button data-u="' + esc(u) + '"' + (CFG.unit===u?' class="on"':'') + '>' + esc(u) + '</button>';
+  });
+  segHtml += '<button data-u=""' + (CFG.unit===null?' class="on"':'') + '>All</button>';
+  seg.innerHTML = segHtml;
+  Array.prototype.forEach.call(seg.querySelectorAll('button'), function(b){
+    b.addEventListener('click', function(){
+      CFG.unit = b.getAttribute('data-u') || null; saveCfg();
+      Array.prototype.forEach.call(seg.querySelectorAll('button'), function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      render();
+    });
+  });
+
+  var when = data.syncedAt ? new Date(data.syncedAt).toLocaleString('en-CA',{dateStyle:'medium',timeStyle:'short'}) : '—';
+  document.getElementById('syncInfo').textContent =
+    'Jobber synced ' + when + ' · ' + ROWS.length + ' visits · ' + data.from + ' → ' + data.to;
+
+  bindNum('sRate','rate'); bindNum('sXdiv','xdiv'); bindNum('sWeeks','weeks');
+  bindChk('sRecur','recur'); bindChk('sUnassigned','unassigned');
+
+  /* one target input per location */
+  var tg = document.getElementById('sTargets');
+  var tgHtml = '';
+  UNITS.forEach(function(u){
+    if (CFG.targets[u] === undefined || CFG.targets[u] === null) {
+      CFG.targets[u] = (CFG.__migrate !== undefined) ? CFG.__migrate : 8;
+    }
+    tgHtml += '<span style="display:flex;flex-direction:column;gap:3px">' +
+      '<input type="number" min="0" step="0.5" data-u="' + esc(u) + '" value="' + CFG.targets[u] + '" style="min-width:78px">' +
+      '<span class="hint" style="text-align:center">' + esc(u === 'Prince George' ? 'PG' : u) + '</span></span>';
+  });
+  delete CFG.__migrate; delete CFG.target;
+  tg.innerHTML = tgHtml;
+  Array.prototype.forEach.call(tg.querySelectorAll('input'), function(el){
+    el.addEventListener('change', function(){
+      var v = parseFloat(el.value);
+      if (isNaN(v)) { el.value = CFG.targets[el.getAttribute('data-u')]; return; }
+      CFG.targets[el.getAttribute('data-u')] = v; saveCfg(); render();
+    });
+  });
+
+  /* excluded (non-technician) names */
+  var nt = document.getElementById('sNonTechs');
+  nt.value = CFG.nonTechs.join(', ');
+  nt.addEventListener('change', function(){
+    CFG.nonTechs = nt.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+    saveCfg(); DOW = {}; saveDow(); render();
+  });
+  var xm = document.getElementById('sXmode');
+  xm.value = CFG.xmode;
+  xm.addEventListener('change', function(){ CFG.xmode = xm.value; saveCfg(); render(); });
+
+  if (!CFG.start) CFG.start = ymd(mondayOf(new Date()));
+  render();
+}
+
+(function(){
+  var api = window.__CAPACITY_API;
+  if (api) {
+    fetch(api).then(function(r){ return r.json(); }).then(boot).catch(function(e){
+      document.getElementById('syncInfo').textContent = 'Could not load data: ' + e.message;
+    });
+  } else if (window.CAPACITY_DATA) {
+    boot(window.CAPACITY_DATA);
+  } else {
+    document.getElementById('syncInfo').textContent = 'No data — run scripts/capacity-sync.ps1';
+  }
+})();
+</script>
+</body>
+</html>
