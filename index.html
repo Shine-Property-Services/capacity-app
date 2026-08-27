@@ -161,6 +161,12 @@
   .tag.r{background:#f2ecff; color:#5b3fa8}
   .tag.u{background:#fff0e0; color:#a35a00}
   .job .n{float:right; text-align:right; font-variant-numeric:tabular-nums}
+  /* neighborhood code from the Shine map */
+  .nb{
+    display:inline-block; background:var(--navy); color:#fff; font-size:10.5px; font-weight:700;
+    letter-spacing:.06em; padding:2px 7px; border-radius:5px; vertical-align:1px;
+  }
+  .nb.near{background:#e7ecf2; color:var(--muted); cursor:help}
   .empty{padding:28px 18px; color:var(--muted); text-align:center}
 
   /* ---------- roster modal ---------- */
@@ -786,8 +792,17 @@ function openDrawer(tech, day, g){
     if (r.x > 0) tags += '<span class="tag x">Christmas ÷' + CFG.xdiv + '</span>';
     if (r.rec) tags += '<span class="tag r">recurring</span>';
     if (!(r.t||[]).length) tags += '<span class="tag u">unassigned</span>';
+    /* neighborhood code from the Shine map; a trailing ~ means the address sat
+       in a gap between polygons and was matched to the nearest one */
+    var nbTag = '';
+    if (r.nb) {
+      var near = /~$/.test(r.nb);
+      nbTag = '<span class="nb' + (near ? ' near' : '') + '"' +
+              (near ? ' title="nearest area - this address falls in a gap on the map"' : '') +
+              '>' + esc(r.nb.replace(/~$/,'')) + (near ? '≈' : '') + '</span> ';
+    }
     var meta = [];
-    if (r.ad) meta.push(esc(r.ad));
+    if (r.ad || nbTag) meta.push(nbTag + esc(r.ad || ''));
     if (r.vc > 1) meta.push('job split across ' + r.vc + ' visits (full job ' + money(r.full) + ')');
     if (j.share < 1) meta.push('shared with ' + Math.round(1/j.share - 1) + ' other tech' + (1/j.share > 2 ? 's' : ''));
     if (r.disc > 0) meta.push('discount of ' + money(r.disc) + ' excluded');
