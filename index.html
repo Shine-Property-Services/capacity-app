@@ -13,6 +13,7 @@
     --hrs-bg:#eef2f7;         /* the "grey" hours column */
     --warn:#fff4e0; --warn-ink:#a35a00;
     --over:#ffe9e6; --over-ink:#b3251a;
+    --route:#ffe6cc; --route-hrs:#ffd9b3; --route-ink:#8a4b00;
     --ok:#e9f9f3;
   }
   *{box-sizing:border-box}
@@ -109,9 +110,15 @@
   }
   td.notemp.hrs{background:repeating-linear-gradient(135deg,#e6ebf2 0 5px,#d9e0e9 5px 10px)}
   td.zero{color:#b7c2ce}
-  td.over{background:var(--over); color:var(--over-ink); font-weight:700}
-  td.over.hrs{background:#ffdad4}
-  td.conflict{background:var(--warn); color:var(--warn-ink); font-weight:700}
+  /* NUMBER COLOUR = short of the day's target */
+  td.under{color:var(--over-ink); font-weight:700}
+  td.under.hrs{background:#fdecea}
+  td.under:not(.hrs){background:#fff6f5}
+  /* HIGHLIGHT = the day's stops drive further than they need to */
+  td.route{background:var(--route) !important}
+  td.route.hrs{background:var(--route-hrs) !important}
+  td.route.under{color:#8f2f00}
+  td.conflict{background:#f0e9ff; color:#5b3fa8; font-weight:700}
   td.clickable{cursor:pointer}
   td.clickable:hover{outline:2px solid var(--teal); outline-offset:-2px}
   tr.weekend td.date{color:var(--muted)}
@@ -167,6 +174,19 @@
     letter-spacing:.06em; padding:2px 7px; border-radius:5px; vertical-align:1px;
   }
   .nb.near{background:#e7ecf2; color:var(--muted); cursor:help}
+
+  /* ---------- route panel in the drawer ---------- */
+  .route-box{margin:12px 18px; border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#fbfdff}
+  .route-box.bad{border-color:#f0c08a; background:#fffaf3}
+  .rt-h{font-weight:650; color:var(--navy); font-size:13px; margin-bottom:8px}
+  .rt-ok{color:#0b7a55; font-weight:600; font-size:11.5px}
+  .rt-why{color:var(--route-ink); font-weight:600; font-size:11.5px}
+  .rt-list{list-style:none; margin:0; padding:0}
+  .rt-stop{font-size:12.5px; padding:3px 0; color:var(--ink)}
+  .rt-stop b{color:var(--navy); font-variant-numeric:tabular-nums; margin-right:4px}
+  .rt-leg{font-size:11.5px; color:var(--muted); padding:2px 0 2px 8px; border-left:2px solid var(--line); margin-left:6px}
+  .rt-leg.over{color:var(--route-ink); font-weight:700; border-left-color:#eda75a}
+  .rt-fix{margin-top:9px; padding-top:9px; border-top:1px solid var(--line); font-size:12px; color:var(--route-ink)}
   .empty{padding:28px 18px; color:var(--muted); text-align:center}
 
   /* ---------- roster modal ---------- */
@@ -250,6 +270,11 @@
     <div class="hint">per location — over this = flagged red</div>
   </div>
   <div class="fld">
+    <label>Max drive between jobs</label>
+    <input type="number" id="sMaxDrive" min="1" step="5">
+    <div class="hint">minutes — over this flags the day orange</div>
+  </div>
+  <div class="fld">
     <label>Weeks shown</label>
     <input type="number" id="sWeeks" min="1" max="30" step="1">
   </div>
@@ -279,8 +304,9 @@
     <span><span class="swatch" style="background:var(--hrs-bg)"></span>hours</span>
     <span><span class="swatch" style="background:#fff"></span>$ booked</span>
     <span><span class="swatch" style="background:#c9d2db"></span>not working</span>
-    <span><span class="swatch" style="background:var(--over)"></span>over target</span>
-    <span><span class="swatch" style="background:var(--warn)"></span>booked on day off</span>
+    <span><span class="swatch" style="background:#fdecea;border-color:#f0b6ae"></span><b style="color:var(--over-ink)">red</b> = under target</span>
+    <span><span class="swatch" style="background:var(--route)"></span>drive time too long</span>
+    <span><span class="swatch" style="background:#f0e9ff"></span>booked on day off</span>
     <span><span class="swatch" style="background:repeating-linear-gradient(135deg,#eef2f7 0 3px,#e2e8f0 3px 6px)"></span>not employed yet / left</span>
   </div>
 </div>
@@ -359,7 +385,7 @@ var NON_TECHS_DEFAULT = ['Craig MacDonald', 'Jaedyn Johnson', 'Eric Spies', 'Jac
 var OTHER = '(unassigned / other staff)';
 
 var CFG = {
-  rate: 160, xdiv: 2, xmode: 'line', weeks: 6,
+  rate: 160, xdiv: 2, xmode: 'line', weeks: 6, maxDrive: 20,
   targets: {},                 /* per location: { 'Victoria': 8, 'Prince George': 8 } */
   nonTechs: NON_TECHS_DEFAULT.slice(),
   /* unit: '' = not chosen yet (default to the first location); null = All */
@@ -431,7 +457,7 @@ try { DOW = JSON.parse(localStorage.getItem(LS_DOW) || '{}'); } catch (e) {}
    (rate, Christmas divisor, targets, who counts as a technician, the roster
    and working days) is stored server-side and shared. Only where you happen
    to be looking — which location, which weeks — stays personal.            */
-var SHARED_KEYS = ['rate','xdiv','xmode','targets','nonTechs','recur','unassigned'];
+var SHARED_KEYS = ['rate','xdiv','xmode','targets','nonTechs','recur','unassigned','maxDrive'];
 var API = window.__CAPACITY_API || null;
 function apiUrl(action){
   if (!API) return null;
@@ -519,6 +545,85 @@ function shareOut(r){
     out.push({ name: keep ? nm : OTHER, h: per, of: all.length });
   });
   return out;
+}
+
+/* ---- drive time / route order ------------------------------------------
+   No routing API here, so drive time is estimated from straight-line distance:
+   a 1.3x detour factor for real roads, at 40 km/h city average including stops
+   -> about 1.95 minutes per straight-line km. Good enough to spot a day that
+   zig-zags across town; not a substitute for actual directions.            */
+var DETOUR = 1.3, SPEED_KMH = 40;
+function haversineKm(a, b){
+  var R = 6371, toRad = Math.PI/180;
+  var dLat = (b.la - a.la) * toRad, dLon = (b.lo - a.lo) * toRad;
+  var la1 = a.la * toRad, la2 = b.la * toRad;
+  var h = Math.sin(dLat/2)*Math.sin(dLat/2) +
+          Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)*Math.sin(dLon/2);
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function driveMin(a, b){ return haversineKm(a, b) * DETOUR / SPEED_KMH * 60; }
+function legsOf(stops){
+  var out = [], t = 0;
+  for (var i = 1; i < stops.length; i++) {
+    var m = driveMin(stops[i-1], stops[i]);
+    out.push(m); t += m;
+  }
+  return { legs: out, total: t };
+}
+/* shortest order through the same stops, keeping the first one fixed
+   (nearest-neighbour then 2-opt — days are small, this is effectively exact) */
+function bestOrder(stops){
+  if (stops.length < 3) return stops.slice();
+  var start = stops[0], rest = stops.slice(1), path = [start];
+  while (rest.length) {
+    var bi = 0, bd = Infinity;
+    for (var i = 0; i < rest.length; i++) {
+      var d = driveMin(path[path.length-1], rest[i]);
+      if (d < bd) { bd = d; bi = i; }
+    }
+    path.push(rest.splice(bi,1)[0]);
+  }
+  var improved = true, guard = 0;
+  while (improved && guard++ < 60) {
+    improved = false;
+    for (var i = 1; i < path.length - 1; i++) {
+      for (var k = i + 1; k < path.length; k++) {
+        var cur = legsOf(path).total;
+        var cand = path.slice(0, i).concat(path.slice(i, k+1).reverse(), path.slice(k+1));
+        if (legsOf(cand).total < cur - 0.01) { path = cand; improved = true; }
+      }
+    }
+  }
+  return path;
+}
+/* Analyse one tech's day: are the stops in a sensible order, and is any single
+   hop longer than the allowed drive time? Returns null when there's nothing to
+   judge (fewer than 2 located stops). */
+function routeOf(jobs){
+  var seen = {}, stops = [];
+  jobs.forEach(function(j){
+    var r = j.r;
+    if (r.la === null || r.la === undefined) return;
+    if (seen[r.jn + '|' + r.t0]) return;          // one visit per job per slot
+    seen[r.jn + '|' + r.t0] = 1;
+    stops.push({ la: +r.la, lo: +r.lo, t0: r.t0 || '', cl: r.cl, ad: r.ad, nb: r.nb, jn: r.jn });
+  });
+  if (stops.length < 2) return null;
+  stops.sort(function(a,b){ return (a.t0 || '').localeCompare(b.t0 || ''); });
+  var sched = legsOf(stops);
+  var best = legsOf(bestOrder(stops));
+  var maxLeg = 0, worst = -1;
+  sched.legs.forEach(function(m, i){ if (m > maxLeg) { maxLeg = m; worst = i; } });
+  var cap = +CFG.maxDrive || 20;
+  var saving = sched.total - best.total;
+  return {
+    stops: stops, legs: sched.legs, total: sched.total,
+    bestTotal: best.total, bestSeq: bestOrder(stops), saving: saving,
+    maxLeg: maxLeg, worstAt: worst,
+    tooFar: maxLeg > cap,
+    resequence: saving > Math.max(5, cap * 0.5),
+    flagged: (maxLeg > cap) || (saving > Math.max(5, cap * 0.5))
+  };
 }
 
 function activeRows(){
@@ -684,12 +789,20 @@ function render(){
 
       var employed = (n === OTHER) || activeOn(n, day);
       var working = employed && ((n === OTHER) || dowsOf(n).indexOf(dowIdx) >= 0);
+      /* two independent signals:
+         NUMBER COLOUR = hours against this location's target (red = short)
+         HIGHLIGHT     = route efficiency (orange = a day that drives too far) */
       var c = '';
       if (!employed) c = ' notemp';
       else if (!working && hh === 0) c = ' off';
       else if (!working && hh > 0) c = ' conflict';
-      else if (targetFor(n) > 0 && hh > targetFor(n)) c = ' over';
+      else if (n !== OTHER && targetFor(n) > 0 && hh < targetFor(n)) c = ' under';
       else if (hh === 0) c = ' zero';
+
+      var route = null;
+      if (n !== OTHER && cell && cell.jobs.length > 1) route = routeOf(cell.jobs);
+      if (route && route.flagged) c += ' route';
+
       var click = hh > 0 ? ' clickable" data-tech="' + esc(n) + '" data-day="' + day + '"' : '"';
 
       var blank = (c === ' off' || c === ' notemp');
@@ -786,6 +899,48 @@ function openDrawer(tech, day, g){
 
   var jobs = cell.jobs.slice().sort(function(a,b){ return b.h - a.h; });
   var html = '';
+
+  /* route panel: the day's stops in scheduled order, with the drive between
+     each, plus a shorter order when one exists */
+  var route = (tech !== OTHER) ? routeOf(cell.jobs) : null;
+  if (route) {
+    var cap = +CFG.maxDrive || 20;
+    var cls = route.flagged ? 'route-box bad' : 'route-box';
+    html += '<div class="' + cls + '">';
+    var why;
+    if (route.resequence) {
+      why = '<span class="rt-why">stops are out of order — a better sequence saves about ' +
+            Math.round(route.saving) + ' min</span>';
+    } else if (route.tooFar) {
+      why = '<span class="rt-why">longest single drive is ' + Math.round(route.maxLeg) +
+            ' min, over the ' + cap + ' min limit</span>';
+    } else {
+      why = '<span class="rt-ok">looks efficient</span>';
+    }
+    html += '<div class="rt-h">Route — ' + Math.round(route.total) + ' min driving across ' +
+            route.stops.length + ' stops<br>' + why + '</div>';
+    html += '<ol class="rt-list">';
+    route.stops.forEach(function(s, i){
+      if (i > 0) {
+        var m = route.legs[i-1];
+        html += '<li class="rt-leg' + (m > cap ? ' over' : '') + '">' +
+                '↓ ' + Math.round(m) + ' min drive' +
+                (m > cap ? ' — over the ' + cap + ' min limit' : '') + '</li>';
+      }
+      html += '<li class="rt-stop"><b>' + (s.t0 || '—') + '</b> ' +
+              (s.nb ? '<span class="nb' + (/~$/.test(s.nb) ? ' near' : '') + '">' +
+                      esc(s.nb.replace(/~$/,'')) + '</span> ' : '') +
+              esc(s.cl || ('#' + s.jn)) + '</li>';
+    });
+    html += '</ol>';
+    if (route.resequence) {
+      html += '<div class="rt-fix">Reordering these stops would save about ' +
+              Math.round(route.saving) + ' min: ' +
+              route.bestSeq.map(function(s){ return esc((s.cl || '#' + s.jn).split(' ')[0]); }).join(' → ') +
+              '</div>';
+    }
+    html += '</div>';
+  }
   jobs.forEach(function(j){
     var r = j.r;
     var tags = '';
@@ -988,7 +1143,7 @@ function boot(data){
   document.getElementById('syncInfo').textContent =
     'Jobber synced ' + when + ' · ' + ROWS.length + ' visits · ' + data.from + ' → ' + data.to;
 
-  bindNum('sRate','rate'); bindNum('sXdiv','xdiv'); bindNum('sWeeks','weeks');
+  bindNum('sRate','rate'); bindNum('sXdiv','xdiv'); bindNum('sWeeks','weeks'); bindNum('sMaxDrive','maxDrive');
   bindChk('sRecur','recur'); bindChk('sUnassigned','unassigned');
 
   /* one target input per location */
