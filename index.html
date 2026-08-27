@@ -241,6 +241,7 @@
   <div class="spacer"></div>
   <div class="sync" id="syncInfo">loading…</div>
   <span class="savestate" id="saveState"></span>
+  <button class="btn" id="syncBtn" style="display:none">Sync now</button>
   <button class="btn" id="rosterBtn">Technicians</button>
   <button class="btn" id="cfgBtn">Settings</button>
 </header>
@@ -979,6 +980,54 @@ function closeDrawer(){
 document.getElementById('dClose').addEventListener('click', closeDrawer);
 document.getElementById('backdrop').addEventListener('click', function(){ closeDrawer(); closeRoster(); });
 
+/* ---------------- force a sync ------------------------------------------
+   The scheduled cloud sync runs every 15 minutes; this pulls Jobber right now
+   so a job booked moments ago shows up without waiting for the next tick.
+   The board and the sync share one passcode, so the key already in the URL
+   works for both. Takes ~30s, then the page reloads with the fresh data.    */
+function syncUrl(){
+  if (!API) return null;
+  return API.replace('/capacity-board', '/capacity-sync')
+            .replace('&format=json', '').replace('?format=json', '');
+}
+function forceSync(){
+  var url = syncUrl();
+  if (!url) return;
+  var btn = document.getElementById('syncBtn');
+  btn.disabled = true;
+  var before = (DATA && DATA.syncedAt) || '';
+  setSaveState('pulling from Jobber…', 'busy');
+  fetch(url, { method: 'POST' })
+    .then(function(r){ return r.json().catch(function(){ return {}; }); })
+    .then(function(res){
+      if (res && res.ok === false) throw new Error(res.error || 'sync failed');
+      setSaveState('checking for new data…', 'busy');
+      /* the sync writes when it finishes; poll the board until the stamp moves */
+      var tries = 0;
+      var poll = setInterval(function(){
+        tries++;
+        fetch(API.replace('&format=json','&format=status'))
+          .then(function(r){ return r.json(); })
+          .then(function(s){
+            if (s && s.syncedAt && s.syncedAt !== before) {
+              clearInterval(poll);
+              setSaveState('up to date — reloading', 'ok');
+              setTimeout(function(){ location.reload(); }, 600);
+            } else if (tries > 40) {          // ~2 min
+              clearInterval(poll);
+              btn.disabled = false;
+              setSaveState('sync ran, data unchanged', 'ok');
+              setTimeout(function(){ setSaveState('', ''); }, 3000);
+            }
+          }).catch(function(){});
+      }, 3000);
+    })
+    .catch(function(e){
+      btn.disabled = false;
+      setSaveState('sync failed: ' + e.message, 'bad');
+    });
+}
+
 /* ---------------- roster manager ---------------------------------------- */
 function renderRoster(){
   var today = ymd(new Date());
@@ -1138,6 +1187,13 @@ function boot(data){
       render();
     });
   });
+
+  /* "Sync now" only makes sense against the hosted API, not a local data.js */
+  if (API) {
+    var sb2 = document.getElementById('syncBtn');
+    sb2.style.display = '';
+    sb2.addEventListener('click', forceSync);
+  }
 
   var when = data.syncedAt ? new Date(data.syncedAt).toLocaleString('en-CA',{dateStyle:'medium',timeStyle:'short'}) : '—';
   document.getElementById('syncInfo').textContent =
