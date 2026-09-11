@@ -525,12 +525,19 @@ function hrs(n){ return (Math.round(n*10)/10).toFixed(1); }
 /* ---------------- core math -------------------------------------------- */
 /* Hours a visit consumes. Christmas lights bill roughly double per hour, so
    their portion is divided by CFG.xdiv before converting to hours.        */
+/* Every job rounds DOWN to the nearest half hour: 3.7 -> 3.5, 4.4 -> 4.0.
+   Applied per JOB (before any crew split), so a 3.7 h job shared by two techs
+   is 3.5 h of work split between them, not two separately-rounded halves. */
+function floorHalf(h){ return Math.floor(h * 2) / 2; }
 function visitHours(r){
   var amt = +r.amt || 0, x = +r.x || 0;
+  var h;
   if (CFG.xmode === 'job') {
-    return x > 0 ? amt / (CFG.xdiv * CFG.rate) : amt / CFG.rate;
+    h = x > 0 ? amt / (CFG.xdiv * CFG.rate) : amt / CFG.rate;
+  } else {
+    h = (amt - x) / CFG.rate + x / (CFG.xdiv * CFG.rate);
   }
-  return (amt - x) / CFG.rate + x / (CFG.xdiv * CFG.rate);
+  return floorHalf(h);
 }
 /* How a visit's hours land on columns. The crew size used for the split is the
    ORIGINAL assignee count, so hiding a non-tech doesn't inflate the tech who
