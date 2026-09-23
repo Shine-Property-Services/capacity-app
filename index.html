@@ -1083,9 +1083,9 @@ function forwardGrid(unit, days){
   });
   return g;
 }
-/* Every (day, tech) that could take this quote, best fit first.
-   "Best" = a tech already working that area that day (no extra driving),
-   then the soonest date, then the day with the most room left. */
+/* Every (day, tech) that could take this quote, SOONEST FIRST.
+   Within the same day we still prefer a tech already working that area (no
+   extra driving), then whoever has the most room left. */
 function quoteSlots(q, limit){
   var need = quoteHours(q);
   var today = ymd(new Date());
@@ -1111,8 +1111,8 @@ function quoteSlots(q, limit){
     });
   });
   out.sort(function(a, b){
-    if (a.sameArea !== b.sameArea) return a.sameArea ? -1 : 1;
     if (a.day !== b.day) return a.day < b.day ? -1 : 1;
+    if (a.sameArea !== b.sameArea) return a.sameArea ? -1 : 1;
     return b.free - a.free;
   });
   return { need: need, slots: out.slice(0, limit || 20), total: out.length };
@@ -1200,7 +1200,7 @@ function quotesHtml(){
  ? '<table><thead><tr><th>Client</th><th>Area</th><th>Value</th><th>Hours</th><th>Where it fits</th><th></th></tr></thead><tbody>' + body + '</tbody></table>'
  : '<div class="empty">No approved quotes waiting to be scheduled.</div>') +
 '<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour.<br>' +
-'<b>Where it fits</b> lists days where that tech still has room under their daily target, best fit first: already working that area, then soonest, then most room left.<br>' +
+'<b>Where it fits</b> lists every technician and day with room under their daily target, <b>soonest first</b>. Where two options fall on the same day, a tech already working that area comes first.<br>' +
 'Picking a slot is a note to yourself — it is remembered here but <b>does not book anything in Jobber</b>. Use the Jobber link to make it real.</p>' +
 '</div><script>' +
 'document.addEventListener("change",function(e){' +
