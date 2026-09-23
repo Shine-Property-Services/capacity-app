@@ -472,7 +472,17 @@ function apiUrl(action){
 }
 function applyShared(c){
   if (!c) return;
-  if (c.cfg) SHARED_KEYS.forEach(function(k){ if (c.cfg[k] !== undefined) CFG[k] = c.cfg[k]; });
+  if (c.cfg) {
+    SHARED_KEYS.forEach(function(k){ if (c.cfg[k] !== undefined) CFG[k] = c.cfg[k]; });
+    /* Legacy shared config: Christmas lights were "base rate x divisor" rather
+       than their own rate. Convert using the rate SAVED ALONGSIDE the divisor —
+       not the local default — or a team that had changed the base rate would
+       silently get the wrong lights rate (e.g. 2 x $170 = $340, not $320). */
+    if (c.cfg.xrate === undefined && c.cfg.xdiv) {
+      var legacyRate = (c.cfg.rate !== undefined) ? +c.cfg.rate : +CFG.rate;
+      CFG.xrate = (legacyRate || 160) * (+c.cfg.xdiv || 2);
+    }
+  }
   if (c.dow) DOW = c.dow;
   if (c.roster) ROSTER = c.roster;
 }
