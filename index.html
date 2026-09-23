@@ -1066,6 +1066,88 @@ function quoteHours(q){
   else h = (amt - x) / rateFor(u) + x / xRateFor(u);
   return floorHalf(h);
 }
+/* ---- placing a job inside a day -------------------------------------------
+   Crews start at 08:30 and leave 30 minutes between the end of one job and the
+   start of the next (travel + setup). A job is slotted into whichever gap adds
+   the least driving, using the same straight-line estimate as the route check. */
+var DAY_START_MIN = 8 * 60 + 30;       // 08:30
+var GAP_MIN = 30;                      // required break between jobs
+var DAY_END_MIN = 18 * 60;             // don't start work that runs past 18:00
+function hhmmToMin(s){
+  if (!s) return null;
+  var p = String(s).split(':');
+  if (p.length < 2) return null;
+  return (+p[0]) * 60 + (+p[1]);
+}
+function minToHhmm(m){
+  var h = Math.floor(m / 60), mm = Math.round(m % 60);
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
+/* that tech's existing stops on that day, in time order */
+function dayStops(unit, tech, day){
+  var out = [];
+  ROWS.forEach(function(r){
+    if (r.u !== unit || r.d !== day) return;
+    if (!CFG.recur && r.rec) return;
+    if ((r.t || []).indexOf(tech) < 0) return;
+    var s = hhmmToMin(r.t0), e = hhmmToMin(r.t1);
+    if (s === null) return;
+    if (e === null || e <= s) e = s + 60;
+    out.push({ s: s, e: e, la: r.la, lo: r.lo, cl: r.cl, jn: r.jn, nb: r.nb });
+  });
+  out.sort(function(a, b){ return a.s - b.s; });
+  return out;
+}
+function driveBetween(a, b){
+  if (!a || !b || a.la == null || b.la == null) return 0;
+  return driveMin({ la: +a.la, lo: +a.lo }, { la: +b.la, lo: +b.lo });
+}
+/* Best start time for `need` hours on this tech/day, or null if it won't fit.
+   Tries every gap: before the first job, between each pair, after the last. */
+function bestTimeFor(quote, unit, tech, day, need){
+  var stops = dayStops(unit, tech, day);
+  var mins = Math.round(need * 60);
+  var q = { la: quote.la, lo: quote.lo };
+  var best = null;
+  function consider(startMin, prev, next){
+    var endMin = startMin + mins;
+    if (startMin < DAY_START_MIN) return;
+    if (endMin > DAY_END_MIN) return;
+    if (next && endMin + GAP_MIN > next.s) return;      // would run into the next job
+    var added = 0;
+    if (prev && next) added = driveBetween(prev, q) + driveBetween(q, next) - driveBetween(prev, next);
+    else if (prev) added = driveBetween(prev, q);
+    else if (next) added = driveBetween(q, next);
+    if (!best || added < best.added - 0.01 || (Math.abs(added - best.added) < 0.01 && startMin < best.startMin)) {
+      best = { startMin: startMin, endMin: endMin, added: added, prev: prev, next: next };
+    }
+  }
+  if (!stops.length) {
+    consider(DAY_START_MIN, null, null);
+  } else {
+    consider(DAY_START_MIN, null, stops[0]);                       // first job of the day
+    for (var i = 0; i < stops.length; i++) {
+      var prev = stops[i], next = stops[i + 1] || null;
+      consider(prev.e + GAP_MIN, prev, next);                      // after this one
+    }
+  }
+  if (!best) return null;
+  return {
+    start: minToHhmm(best.startMin), end: minToHhmm(best.endMin),
+    startMin: best.startMin, endMin: best.endMin,
+    addedDrive: Math.round(best.added),
+    after: best.prev ? (best.prev.cl || ('#' + best.prev.jn)) : null,
+    before: best.next ? (best.next.cl || ('#' + best.next.jn)) : null,
+  };
+}
+/* the job title Jobber will get: AREA [hours] (crew) SERVICES */
+function jobTitleFor(quote, need, crew){
+  var area = quote.nb ? String(quote.nb).replace(/~$/, '') : '';
+  var svc = (quote.svc || []).join(', ');
+  return (area ? area + ' ' : '') + '[' + hrs(need).replace(/\.0$/, '') + '] (' + (crew || 1) + ')' +
+         (svc ? ' ' + svc : '');
+}
+
 /* booked hours + which areas each tech is already in, for one location */
 function forwardGrid(unit, days){
   var dayset = {}; days.forEach(function(d){ dayset[d] = 1; });
@@ -1106,12 +1188,17 @@ function quoteSlots(q, limit){
       var target = targetFor(n);
       var free = target - booked;
       if (free + 0.001 < need) return;
+      /* there must also be a real gap in the day, not just spare hours */
+      var t = bestTimeFor(q, q.u, n, day, need);
+      if (!t) return;
       var sameArea = !!(qNb && cell && cell.nbs[qNb]);
-      out.push({ day: day, tech: n, free: free, booked: booked, sameArea: sameArea });
+      out.push({ day: day, tech: n, free: free, booked: booked, sameArea: sameArea, time: t });
     });
   });
   out.sort(function(a, b){
     if (a.day !== b.day) return a.day < b.day ? -1 : 1;
+    /* within a day, the slot that adds the least driving wins */
+    if (Math.abs(a.time.addedDrive - b.time.addedDrive) > 0.5) return a.time.addedDrive - b.time.addedDrive;
     if (a.sameArea !== b.sameArea) return a.sameArea ? -1 : 1;
     return b.free - a.free;
   });
@@ -1144,7 +1231,8 @@ function quotesHtml(){
       var lbl = s.tech + ' — ' +
         DOWS[(d.getDay()+6)%7] + ' ' + d.getDate() + ' ' +
         ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] +
-        ' — ' + hrs(s.free) + ' h free of ' + hrs(targetFor(s.tech)) +
+        ' — ' + s.time.start + '–' + s.time.end +
+        (s.time.addedDrive ? ' — +' + s.time.addedDrive + ' min driving' : ' — no extra driving') +
         (s.sameArea ? ' — already in ' + String(q.nb).replace(/~$/,'') : '');
       var val = s.day + '|' + s.tech;
       return '<option value="' + esc(val) + '"' + (plan[q.qn] === val ? ' selected' : '') + '>' + esc(lbl) + '</option>';
@@ -1158,7 +1246,8 @@ function quotesHtml(){
         '<div class="sub">' + esc(q.ad || '') + '</div></td>' +
       '<td class="c nbcell">' + nb + '</td>' +
       '<td class="c num">' + money(q.amt) + (q.x > 0 ? '<div class="sub xm">lights ' + money(q.x) + '</div>' : '') + '</td>' +
-      '<td class="c num need">' + hrs(r.need) + ' h</td>' +
+      '<td class="c num need">' + hrs(r.need) + ' h' +
+        '<div class="sub ttl" title="the job title this will get in Jobber">' + esc(jobTitleFor(q, r.need, 1)) + '</div></td>' +
       '<td class="c">' +
         (r.slots.length
           ? '<select data-q="' + esc(q.qn) + '"><option value="">' + r.total + ' option' + (r.total===1?'':'s') + ' — pick a slot…</option>' + opts + '</select>'
@@ -1181,6 +1270,7 @@ function quotesHtml(){
 '.cl{font-weight:650;color:#01355d}' +
 '.sub{font-size:12px;color:#61748a;margin-top:2px}' +
 '.sub.xm{color:#0a6a97}' +
+'.sub.ttl{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#01355d;background:#eef3f8;border-radius:4px;padding:2px 6px;display:inline-block;margin-top:4px;text-align:left}' +
 '.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
 '.need{font-weight:700;color:#01355d}' +
 '.nb{display:inline-block;background:#01355d;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:2px 7px;border-radius:5px}' +
@@ -1200,7 +1290,7 @@ function quotesHtml(){
  ? '<table><thead><tr><th>Client</th><th>Area</th><th>Value</th><th>Hours</th><th>Where it fits</th><th></th></tr></thead><tbody>' + body + '</tbody></table>'
  : '<div class="empty">No approved quotes waiting to be scheduled.</div>') +
 '<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour.<br>' +
-'<b>Where it fits</b> lists every technician and day with room under their daily target, <b>soonest first</b>. Where two options fall on the same day, a tech already working that area comes first.<br>' +
+'<b>Where it fits</b> lists every technician and day that can actually take the job, <b>soonest first</b>. Each option shows the <b>best time in that day</b> — crews start at 08:30, jobs keep 30 minutes between them, and the slot chosen is the one that adds the least driving. Within a day the most efficient option is listed first.<br>' +
 'Picking a slot is a note to yourself — it is remembered here but <b>does not book anything in Jobber</b>. Use the Jobber link to make it real.</p>' +
 '</div><script>' +
 'document.addEventListener("change",function(e){' +
