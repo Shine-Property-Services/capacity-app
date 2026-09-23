@@ -253,9 +253,9 @@
     <div class="hint">job subtotal ÷ this = hours</div>
   </div>
   <div class="fld">
-    <label>Christmas divisor</label>
-    <input type="number" id="sXdiv" min="1" step="0.5">
-    <div class="hint">lights: subtotal ÷ this ÷ rate</div>
+    <label>Christmas lights rate</label>
+    <input type="number" id="sXrate" min="1" step="10">
+    <div class="hint">$/hour for lights work</div>
   </div>
   <div class="fld">
     <label>Christmas rule applies to</label>
@@ -386,7 +386,7 @@ var NON_TECHS_DEFAULT = ['Craig MacDonald', 'Jaedyn Johnson', 'Eric Spies', 'Jac
 var OTHER = '(unassigned / other staff)';
 
 var CFG = {
-  rate: 160, xdiv: 2, xmode: 'line', weeks: 6, maxDrive: 20,
+  rate: 160, xrate: 320, xmode: 'line', weeks: 6, maxDrive: 20,
   targets: {},                 /* per location: { 'Victoria': 8, 'Prince George': 8 } */
   nonTechs: NON_TECHS_DEFAULT.slice(),
   /* unit: '' = not chosen yet (default to the first location); null = All */
@@ -399,6 +399,11 @@ if (typeof CFG.target === 'number' && !Object.keys(CFG.targets || {}).length) {
 }
 if (!CFG.targets) CFG.targets = {};
 if (!Array.isArray(CFG.nonTechs)) CFG.nonTechs = NON_TECHS_DEFAULT.slice();
+/* Christmas lights used to be "base rate x this divisor"; it is now its own
+   hourly rate. Convert an old saved divisor so nothing moves on upgrade. */
+if (!CFG.xrate && CFG.xdiv) CFG.xrate = (+CFG.rate || 160) * (+CFG.xdiv || 2);
+if (!CFG.xrate) CFG.xrate = 320;
+delete CFG.xdiv;
 
 function isTech(name){
   if (name === OTHER) return false;
@@ -458,7 +463,7 @@ try { DOW = JSON.parse(localStorage.getItem(LS_DOW) || '{}'); } catch (e) {}
    (rate, Christmas divisor, targets, who counts as a technician, the roster
    and working days) is stored server-side and shared. Only where you happen
    to be looking — which location, which weeks — stays personal.            */
-var SHARED_KEYS = ['rate','xdiv','xmode','targets','nonTechs','recur','unassigned','maxDrive'];
+var SHARED_KEYS = ['rate','xrate','xmode','targets','nonTechs','recur','unassigned','maxDrive'];
 var API = window.__CAPACITY_API || null;
 function apiUrl(action){
   if (!API) return null;
@@ -524,18 +529,21 @@ function hrs(n){ return (Math.round(n*10)/10).toFixed(1); }
 
 /* ---------------- core math -------------------------------------------- */
 /* Hours a visit consumes. Christmas lights bill roughly double per hour, so
-   their portion is divided by CFG.xdiv before converting to hours.        */
+   their portion converts to hours at its own rate (CFG.xrate), not the base.  */
 /* Every job rounds DOWN to the nearest half hour: 3.7 -> 3.5, 4.4 -> 4.0.
    Applied per JOB (before any crew split), so a 3.7 h job shared by two techs
    is 3.5 h of work split between them, not two separately-rounded halves. */
 function floorHalf(h){ return Math.floor(h * 2) / 2; }
+/* Christmas lights bill at their own hourly rate; fall back to the base rate
+   rather than dividing by zero if it is ever cleared. */
+function xRate(){ var v = +CFG.xrate; return (v && v > 0) ? v : (+CFG.rate || 160); }
 function visitHours(r){
   var amt = +r.amt || 0, x = +r.x || 0;
   var h;
   if (CFG.xmode === 'job') {
-    h = x > 0 ? amt / (CFG.xdiv * CFG.rate) : amt / CFG.rate;
+    h = x > 0 ? amt / xRate() : amt / CFG.rate;
   } else {
-    h = (amt - x) / CFG.rate + x / (CFG.xdiv * CFG.rate);
+    h = (amt - x) / CFG.rate + x / xRate();
   }
   return floorHalf(h);
 }
@@ -952,7 +960,7 @@ function openDrawer(tech, day, g){
   jobs.forEach(function(j){
     var r = j.r;
     var tags = '';
-    if (r.x > 0) tags += '<span class="tag x">Christmas ÷' + CFG.xdiv + '</span>';
+    if (r.x > 0) tags += '<span class="tag x">Christmas @ ' + money(xRate()) + '/hr</span>';
     if (r.rec) tags += '<span class="tag r">recurring</span>';
     if (!(r.t||[]).length) tags += '<span class="tag u">unassigned</span>';
     /* neighborhood code from the Shine map; a trailing ~ means the address sat
@@ -1206,7 +1214,7 @@ function boot(data){
   document.getElementById('syncInfo').textContent =
     'Jobber synced ' + when + ' · ' + ROWS.length + ' visits · ' + data.from + ' → ' + data.to;
 
-  bindNum('sRate','rate'); bindNum('sXdiv','xdiv'); bindNum('sWeeks','weeks'); bindNum('sMaxDrive','maxDrive');
+  bindNum('sRate','rate'); bindNum('sXrate','xrate'); bindNum('sWeeks','weeks'); bindNum('sMaxDrive','maxDrive');
   bindChk('sRecur','recur'); bindChk('sUnassigned','unassigned');
 
   /* one target input per location */
