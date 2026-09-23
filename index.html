@@ -175,6 +175,19 @@
   }
   .nb.near{background:#e7ecf2; color:var(--muted); cursor:help}
 
+  /* fallback panel when the approved-quotes pop-up is blocked */
+  #qOverlay{position:fixed; inset:0; z-index:400; background:var(--bg); display:flex; flex-direction:column}
+  #qOverlay .qbar{
+    background:var(--navy); color:#fff; padding:10px 18px; font-size:12.5px;
+    display:flex; align-items:center; gap:14px;
+  }
+  #qOverlay .qbar span{flex:1}
+  #qOverlay .qbar button{
+    background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); color:#fff;
+    padding:5px 14px; border-radius:7px; font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer;
+  }
+  #qOverlay iframe{flex:1; width:100%; border:0}
+
   /* ---------- route panel in the drawer ---------- */
   .route-box{margin:12px 18px; border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#fbfdff}
   .route-box.bad{border-color:#f0c08a; background:#fffaf3}
@@ -241,6 +254,7 @@
   <div class="spacer"></div>
   <div class="sync" id="syncInfo">loading…</div>
   <span class="savestate" id="saveState"></span>
+  <button class="btn" id="quotesBtn" style="display:none">Approved quotes</button>
   <button class="btn" id="syncBtn" style="display:none">Sync now</button>
   <button class="btn" id="rosterBtn">Technicians</button>
   <button class="btn" id="cfgBtn">Settings</button>
@@ -249,13 +263,13 @@
 <div class="settings" id="settings">
   <div class="fld">
     <label>Hourly rate</label>
-    <input type="number" id="sRate" min="1" step="5">
-    <div class="hint">job subtotal ÷ this = hours</div>
+    <div id="sRates" style="display:flex; gap:10px"></div>
+    <div class="hint">per location — job subtotal ÷ this = hours</div>
   </div>
   <div class="fld">
     <label>Christmas lights rate</label>
-    <input type="number" id="sXrate" min="1" step="10">
-    <div class="hint">$/hour for lights work</div>
+    <div id="sXrates" style="display:flex; gap:10px"></div>
+    <div class="hint">per location — $/hour for lights work</div>
   </div>
   <div class="fld">
     <label>Christmas rule applies to</label>
@@ -463,7 +477,7 @@ try { DOW = JSON.parse(localStorage.getItem(LS_DOW) || '{}'); } catch (e) {}
    (rate, Christmas divisor, targets, who counts as a technician, the roster
    and working days) is stored server-side and shared. Only where you happen
    to be looking — which location, which weeks — stays personal.            */
-var SHARED_KEYS = ['rate','xrate','xmode','targets','nonTechs','recur','unassigned','maxDrive'];
+var SHARED_KEYS = ['rate','xrate','rates','xrates','xmode','targets','nonTechs','recur','unassigned','maxDrive'];
 var API = window.__CAPACITY_API || null;
 function apiUrl(action){
   if (!API) return null;
@@ -546,14 +560,30 @@ function hrs(n){ return (Math.round(n*10)/10).toFixed(1); }
 function floorHalf(h){ return Math.floor(h * 2) / 2; }
 /* Christmas lights bill at their own hourly rate; fall back to the base rate
    rather than dividing by zero if it is ever cleared. */
-function xRate(){ var v = +CFG.xrate; return (v && v > 0) ? v : (+CFG.rate || 160); }
+/* Rates are PER LOCATION — Victoria and Prince George charge differently.
+   CFG.rates / CFG.xrates are keyed by unit; the old single values are kept as
+   the fallback so an older saved config still behaves the same. */
+function rateFor(unit){
+  var v = unit && CFG.rates ? +CFG.rates[unit] : NaN;
+  if (v && v > 0) return v;
+  return (+CFG.rate > 0) ? +CFG.rate : 160;
+}
+function xRateFor(unit){
+  var v = unit && CFG.xrates ? +CFG.xrates[unit] : NaN;
+  if (v && v > 0) return v;
+  if (+CFG.xrate > 0) return +CFG.xrate;
+  return rateFor(unit);
+}
+/* unit of the row/tech we are pricing; falls back to the current view */
+function unitOf(x){ return x || CFG.unit || (UNITS.length ? UNITS[0] : null); }
 function visitHours(r){
   var amt = +r.amt || 0, x = +r.x || 0;
   var h;
+  var u = unitOf(r.u);
   if (CFG.xmode === 'job') {
-    h = x > 0 ? amt / xRate() : amt / CFG.rate;
+    h = x > 0 ? amt / xRateFor(u) : amt / rateFor(u);
   } else {
-    h = (amt - x) / CFG.rate + x / xRate();
+    h = (amt - x) / rateFor(u) + x / xRateFor(u);
   }
   return floorHalf(h);
 }
@@ -753,6 +783,8 @@ function render(){
   document.getElementById('rangeLbl').textContent =
     fmtDay(start).replace(/^\w+ /,'') + '  →  ' + fmtDay(addDays(start, CFG.weeks*7-1)).replace(/^\w+ /,'');
 
+  updateQuotesBtn();
+
   var t = document.getElementById('grid');
   var h = '';
 
@@ -809,7 +841,7 @@ function render(){
       /* round to the displayed 0.1 h first, so the $ column always equals
          the hours you can see × the rate (the sheet works this way) */
       var hh = cell ? Math.round(cell.h * 10) / 10 : 0;
-      var mm = hh * CFG.rate;
+      var mm = hh * rateFor(unitOf(n === OTHER ? null : unitOfTech(n)));
       dayH += hh; dayM += mm;
       wkH[n] = (wkH[n]||0) + hh; wkM[n] = (wkM[n]||0) + mm;
 
@@ -921,7 +953,7 @@ function openDrawer(tech, day, g){
   /* same 0.1 h rounding as the grid, so the drawer reconciles with the cell */
   var cellH = Math.round(cell.h * 10) / 10;
   document.getElementById('dSub').textContent =
-    fmtDay(parseYmd(day)) + ' · ' + hrs(cellH) + ' h · ' + money(cellH * CFG.rate);
+    fmtDay(parseYmd(day)) + ' · ' + hrs(cellH) + ' h · ' + money(cellH * rateFor(unitOf(tech === OTHER ? null : unitOfTech(tech))));
 
   var jobs = cell.jobs.slice().sort(function(a,b){ return b.h - a.h; });
   var html = '';
@@ -970,7 +1002,7 @@ function openDrawer(tech, day, g){
   jobs.forEach(function(j){
     var r = j.r;
     var tags = '';
-    if (r.x > 0) tags += '<span class="tag x">Christmas @ ' + money(xRate()) + '/hr</span>';
+    if (r.x > 0) tags += '<span class="tag x">Christmas @ ' + money(xRateFor(unitOf(r.u))) + '/hr</span>';
     if (r.rec) tags += '<span class="tag r">recurring</span>';
     if (!(r.t||[]).length) tags += '<span class="tag u">unassigned</span>';
     /* neighborhood code from the Shine map; a trailing ~ means the address sat
@@ -989,7 +1021,7 @@ function openDrawer(tech, day, g){
     if (r.disc > 0) meta.push('discount of ' + money(r.disc) + ' excluded');
     var jh = Math.round(j.h * 10) / 10;
     html += '<div class="job">' +
-      '<div class="n">' + hrs(jh) + ' h<br><span style="color:var(--muted);font-size:12px">' + money(jh * CFG.rate) + '</span></div>' +
+      '<div class="n">' + hrs(jh) + ' h<br><span style="color:var(--muted);font-size:12px">' + money(jh * rateFor(unitOf(r.u))) + '</span></div>' +
       '<div class="t">' + esc(r.cl || 'Client') + ' <span style="color:var(--muted);font-weight:400">#' + esc(r.jn) + '</span>' + tags + '</div>' +
       '<div class="m">' + (r.ti ? esc(r.ti) + '<br>' : '') + meta.join(' · ') + '</div>' +
       '</div>';
@@ -1004,6 +1036,203 @@ function closeDrawer(){
 }
 document.getElementById('dClose').addEventListener('click', closeDrawer);
 document.getElementById('backdrop').addEventListener('click', function(){ closeDrawer(); closeRoster(); });
+
+/* ---------------- approved quotes waiting to be scheduled ----------------
+   Jobber marks a quote "converted" once it becomes a job, so anything still
+   "approved" is work that has been sold but not yet put on the calendar.
+   For each one we work out how many hours it needs (same rules as a booked
+   job) and then list every day/tech that still has room for it.            */
+var LS_QPLAN = 'shine_cap_qplan';
+/* keep the header count in step with the location filter */
+function updateQuotesBtn(){
+  var b = document.getElementById('quotesBtn');
+  if (!b || b.style.display === 'none') return;
+  var all = (DATA && DATA.quotes) ? DATA.quotes : [];
+  var n = all.filter(function(q){ return !CFG.unit || q.u === CFG.unit; }).length;
+  b.textContent = 'Approved quotes (' + n + ')';
+  b.disabled = n === 0;
+  b.style.opacity = n === 0 ? 0.5 : 1;
+}
+function quoteHours(q){
+  var amt = +q.amt || 0, x = +q.x || 0;
+  var h;
+  var u = unitOf(q.u);
+  if (CFG.xmode === 'job') h = x > 0 ? amt / xRateFor(u) : amt / rateFor(u);
+  else h = (amt - x) / rateFor(u) + x / xRateFor(u);
+  return floorHalf(h);
+}
+/* booked hours + which areas each tech is already in, for one location */
+function forwardGrid(unit, days){
+  var dayset = {}; days.forEach(function(d){ dayset[d] = 1; });
+  var g = {};
+  ROWS.forEach(function(r){
+    if (r.u !== unit || !dayset[r.d]) return;
+    if (!CFG.recur && r.rec) return;
+    shareOut(r).forEach(function(p){
+      if (p.name === OTHER) return;
+      if (!g[p.name]) g[p.name] = {};
+      if (!g[p.name][r.d]) g[p.name][r.d] = { h:0, nbs:{} };
+      g[p.name][r.d].h += p.h;
+      if (r.nb) g[p.name][r.d].nbs[String(r.nb).replace(/~$/,'')] = 1;
+    });
+  });
+  return g;
+}
+/* Every (day, tech) that could take this quote, best fit first.
+   "Best" = a tech already working that area that day (no extra driving),
+   then the soonest date, then the day with the most room left. */
+function quoteSlots(q, limit){
+  var need = quoteHours(q);
+  var today = ymd(new Date());
+  var lastDay = (DATA && DATA.to) ? DATA.to : ymd(addDays(new Date(), 120));
+  var days = [];
+  for (var d = parseYmd(today); ymd(d) <= lastDay && days.length < 200; d = addDays(d, 1)) days.push(ymd(d));
+  var g = forwardGrid(q.u, days);
+  var techs = allTechNames().filter(function(n){ return unitOfTech(n) === q.u; });
+  var qNb = q.nb ? String(q.nb).replace(/~$/,'') : null;
+  var out = [];
+  days.forEach(function(day){
+    var dowIdx = (parseYmd(day).getDay() + 6) % 7;
+    techs.forEach(function(n){
+      if (!activeOn(n, day)) return;
+      if (dowsOf(n).indexOf(dowIdx) < 0) return;
+      var cell = g[n] && g[n][day];
+      var booked = cell ? cell.h : 0;
+      var target = targetFor(n);
+      var free = target - booked;
+      if (free + 0.001 < need) return;
+      var sameArea = !!(qNb && cell && cell.nbs[qNb]);
+      out.push({ day: day, tech: n, free: free, booked: booked, sameArea: sameArea });
+    });
+  });
+  out.sort(function(a, b){
+    if (a.sameArea !== b.sameArea) return a.sameArea ? -1 : 1;
+    if (a.day !== b.day) return a.day < b.day ? -1 : 1;
+    return b.free - a.free;
+  });
+  return { need: need, slots: out.slice(0, limit || 20), total: out.length };
+}
+
+function quotesHtml(){
+  var all = (DATA && DATA.quotes) ? DATA.quotes : [];
+  var list = all.filter(function(q){ return !CFG.unit || q.u === CFG.unit; });
+  var plan = {};
+  try { plan = JSON.parse(localStorage.getItem(LS_QPLAN) || '{}'); } catch(e){}
+
+  var rows = list.map(function(q){
+    var r = quoteSlots(q, 25);
+    return { q: q, need: r.need, slots: r.slots, total: r.total };
+  }).sort(function(a, b){ return (a.q.appr || '').localeCompare(b.q.appr || ''); });
+
+  var totalValue = list.reduce(function(s, q){ return s + (+q.amt || 0); }, 0);
+  var totalHours = rows.reduce(function(s, r){ return s + r.need; }, 0);
+
+  var body = rows.map(function(r){
+    var q = r.q;
+    var nb = q.nb
+      ? '<span class="nb' + (/~$/.test(q.nb) ? ' near' : '') + '">' + esc(String(q.nb).replace(/~$/,'')) + '</span>'
+      : '<span class="nb none">no area</span>';
+    var opts = r.slots.map(function(s, i){
+      var d = parseYmd(s.day);
+      /* technician is named in every option — that is the whole point of the
+         suggestion: which person, on which day, with room to take it on */
+      var lbl = s.tech + ' — ' +
+        DOWS[(d.getDay()+6)%7] + ' ' + d.getDate() + ' ' +
+        ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] +
+        ' — ' + hrs(s.free) + ' h free of ' + hrs(targetFor(s.tech)) +
+        (s.sameArea ? ' — already in ' + String(q.nb).replace(/~$/,'') : '');
+      var val = s.day + '|' + s.tech;
+      return '<option value="' + esc(val) + '"' + (plan[q.qn] === val ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+    }).join('');
+    var none = !r.slots.length
+      ? '<div class="nofit">No day has ' + hrs(r.need) + ' h free — raise the target, add a tech, or split the job.</div>'
+      : '';
+    return '<tr>' +
+      '<td class="c"><div class="cl">' + esc(q.cl || 'Client') + '</div>' +
+        '<div class="sub">#' + esc(q.qn) + (q.ti ? ' · ' + esc(q.ti) : '') + '</div>' +
+        '<div class="sub">' + esc(q.ad || '') + '</div></td>' +
+      '<td class="c nbcell">' + nb + '</td>' +
+      '<td class="c num">' + money(q.amt) + (q.x > 0 ? '<div class="sub xm">lights ' + money(q.x) + '</div>' : '') + '</td>' +
+      '<td class="c num need">' + hrs(r.need) + ' h</td>' +
+      '<td class="c">' +
+        (r.slots.length
+          ? '<select data-q="' + esc(q.qn) + '"><option value="">' + r.total + ' option' + (r.total===1?'':'s') + ' — pick a slot…</option>' + opts + '</select>'
+          : '') + none +
+      '<div class="picked" id="p-' + esc(q.qn) + '"></div></td>' +
+      '<td class="c">' + (q.url ? '<a href="' + esc(q.url) + '" target="_blank" rel="noopener">Open in Jobber ↗</a>' : '') + '</td>' +
+      '</tr>';
+  }).join('');
+
+  var html =
+'<!doctype html><html><head><meta charset="utf-8"><title>Approved quotes to schedule</title><style>' +
+'body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f4f7fa;color:#12212e;font-size:14px}' +
+'header{background:linear-gradient(180deg,#01355d,#0a2c47);color:#fff;padding:16px 22px}' +
+'header h1{margin:0;font-size:17px;font-weight:650}header h1 span{color:#22d8d2}' +
+'.meta{font-size:12.5px;color:#b9cde0;margin-top:5px}' +
+'.wrap{padding:18px 22px}' +
+'table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(1,53,93,.12)}' +
+'th{background:#eef3f8;color:#61748a;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;text-align:left;padding:10px 12px}' +
+'td.c{padding:12px;border-top:1px solid #eef3f8;vertical-align:top}' +
+'.cl{font-weight:650;color:#01355d}' +
+'.sub{font-size:12px;color:#61748a;margin-top:2px}' +
+'.sub.xm{color:#0a6a97}' +
+'.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
+'.need{font-weight:700;color:#01355d}' +
+'.nb{display:inline-block;background:#01355d;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:2px 7px;border-radius:5px}' +
+'.nb.near{background:#e7ecf2;color:#61748a}.nb.none{background:#f1f3f6;color:#9aa7b5}' +
+'select{width:100%;max-width:430px;border:1px solid #dbe3ec;border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px;background:#fff}' +
+'.nofit{font-size:12.5px;color:#b3251a;background:#fdecea;border-radius:7px;padding:8px 10px}' +
+'.picked{font-size:12.5px;color:#0b7a55;font-weight:600;margin-top:6px}' +
+'a{color:#0fb3ae;font-size:12.5px;font-weight:600;text-decoration:none;white-space:nowrap}a:hover{text-decoration:underline}' +
+'.empty{padding:40px;text-align:center;color:#61748a}' +
+'.note{margin:16px 0 0;font-size:12px;color:#61748a;line-height:1.6}' +
+'</style></head><body>' +
+'<header><h1>Approved quotes <span>to schedule</span></h1>' +
+'<div class="meta">' + list.length + ' quote' + (list.length===1?'':'s') + ' · ' + money(totalValue) +
+' · ' + hrs(totalHours) + ' h of work' + (CFG.unit ? ' · ' + esc(CFG.unit) : ' · all locations') + '</div></header>' +
+'<div class="wrap">' +
+(list.length
+ ? '<table><thead><tr><th>Client</th><th>Area</th><th>Value</th><th>Hours</th><th>Where it fits</th><th></th></tr></thead><tbody>' + body + '</tbody></table>'
+ : '<div class="empty">No approved quotes waiting to be scheduled.</div>') +
+'<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour.<br>' +
+'<b>Where it fits</b> lists days where that tech still has room under their daily target, best fit first: already working that area, then soonest, then most room left.<br>' +
+'Picking a slot is a note to yourself — it is remembered here but <b>does not book anything in Jobber</b>. Use the Jobber link to make it real.</p>' +
+'</div><script>' +
+'document.addEventListener("change",function(e){' +
+'if(e.target.tagName!=="SELECT")return;' +
+'var q=e.target.getAttribute("data-q"),v=e.target.value;' +
+'var plan={};try{plan=JSON.parse(localStorage.getItem("' + LS_QPLAN + '")||"{}")}catch(x){}' +
+'if(v)plan[q]=v;else delete plan[q];' +
+'try{localStorage.setItem("' + LS_QPLAN + '",JSON.stringify(plan))}catch(x){}' +
+'var el=document.getElementById("p-"+q);' +
+'el.textContent=v?("Pencilled in — "+e.target.options[e.target.selectedIndex].text):"";' +
+'});' +
+'<\/script></body></html>';
+
+  return html;
+}
+
+function openQuotes(){
+  var html = quotesHtml();
+  var w = window.open('', 'shine-approved-quotes', 'width=1180,height=860');
+  if (w && w.document) {
+    w.document.open(); w.document.write(html); w.document.close(); w.focus();
+    return;
+  }
+  /* Some browsers (and embedded/in-app ones) block pop-ups outright. Rather
+     than dead-ending, show the same page over the planner. */
+  var back = document.getElementById('qOverlay');
+  if (back) back.remove();
+  back = document.createElement('div');
+  back.id = 'qOverlay';
+  back.innerHTML =
+    '<div class="qbar"><span>Approved quotes — your browser blocked the pop-up, ' +
+    'so it is shown here instead.</span><button id="qClose">Close</button></div>' +
+    '<iframe></iframe>';
+  document.body.appendChild(back);
+  back.querySelector('iframe').srcdoc = html;
+  back.querySelector('#qClose').addEventListener('click', function(){ back.remove(); });
+}
 
 /* ---------------- force a sync ------------------------------------------
    The scheduled cloud sync runs every 15 minutes; this pulls Jobber right now
@@ -1213,6 +1442,13 @@ function boot(data){
     });
   });
 
+  var qb = document.getElementById('quotesBtn');
+  if ((data.quotes || []).length) {
+    qb.style.display = '';
+    qb.addEventListener('click', openQuotes);
+    updateQuotesBtn();
+  }
+
   /* "Sync now" only makes sense against the hosted API, not a local data.js */
   if (API) {
     var sb2 = document.getElementById('syncBtn');
@@ -1224,7 +1460,7 @@ function boot(data){
   document.getElementById('syncInfo').textContent =
     'Jobber synced ' + when + ' · ' + ROWS.length + ' visits · ' + data.from + ' → ' + data.to;
 
-  bindNum('sRate','rate'); bindNum('sXrate','xrate'); bindNum('sWeeks','weeks'); bindNum('sMaxDrive','maxDrive');
+  bindNum('sWeeks','weeks'); bindNum('sMaxDrive','maxDrive');
   bindChk('sRecur','recur'); bindChk('sUnassigned','unassigned');
 
   /* one target input per location */
@@ -1247,6 +1483,33 @@ function boot(data){
       CFG.targets[el.getAttribute('data-u')] = v; saveCfg(); render();
     });
   });
+
+  /* one rate input per location, for the base rate and the lights rate.
+     Seeded from the old single values so nothing moves on upgrade. */
+  function rateInputs(holderId, store, legacy, fallback){
+    if (!CFG[store]) CFG[store] = {};
+    var box = document.getElementById(holderId);
+    var html = '';
+    UNITS.forEach(function(u){
+      if (CFG[store][u] === undefined || CFG[store][u] === null || !(+CFG[store][u] > 0)) {
+        CFG[store][u] = (+CFG[legacy] > 0) ? +CFG[legacy] : fallback;
+      }
+      html += '<span style="display:flex;flex-direction:column;gap:3px">' +
+        '<input type="number" min="1" step="5" data-u="' + esc(u) + '" value="' + CFG[store][u] + '" style="min-width:84px">' +
+        '<span class="hint" style="text-align:center">' + esc(u === 'Prince George' ? 'PG' : u) + '</span></span>';
+    });
+    box.innerHTML = html;
+    Array.prototype.forEach.call(box.querySelectorAll('input'), function(el){
+      el.addEventListener('change', function(){
+        var v = parseFloat(el.value);
+        var u = el.getAttribute('data-u');
+        if (isNaN(v) || v <= 0) { el.value = CFG[store][u]; return; }
+        CFG[store][u] = v; saveCfg(); render();
+      });
+    });
+  }
+  rateInputs('sRates', 'rates', 'rate', 160);
+  rateInputs('sXrates', 'xrates', 'xrate', 320);
 
   /* excluded (non-technician) names */
   var nt = document.getElementById('sNonTechs');
