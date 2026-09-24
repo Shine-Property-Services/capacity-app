@@ -332,7 +332,7 @@
   <div class="spacer"></div>
   <div class="legend">
     <span><span class="swatch" style="background:var(--hrs-bg)"></span>hours</span>
-    <span><span class="swatch" style="background:#fff"></span>$ booked</span>
+    <span><span class="swatch" style="background:#fff"></span>$ revenue booked</span>
     <span><span class="swatch" style="background:#c9d2db"></span>not working</span>
     <span><span class="swatch" style="background:#fdecea;border-color:#f0b6ae"></span><b style="color:var(--over-ink)">red</b> = under target</span>
     <span><span class="swatch" style="background:var(--route)"></span>drive time too long</span>
@@ -606,15 +606,23 @@ function visitHours(r){
 /* How a visit's hours land on columns. The crew size used for the split is the
    ORIGINAL assignee count, so hiding a non-tech doesn't inflate the tech who
    shared the job with them — the non-tech's share moves to the catch-all. */
+/* what this visit is worth: the job total after discounts, which is what
+   Jobber's revenue reports show. Older data has no `net`, so fall back. */
+function visitRevenue(r){
+  if (r.net !== undefined && r.net !== null) return +r.net || 0;
+  var vc = Math.max(1, +r.vc || 1);
+  return Math.max(0, (+r.amt || 0) - (+r.disc || 0) / vc);
+}
 function shareOut(r){
   var all = r.t || [];
   var total = visitHours(r);
-  if (!all.length) return [{ name: OTHER, h: total, of: 1 }];
-  var per = total / all.length;
+  var rev = visitRevenue(r);
+  if (!all.length) return [{ name: OTHER, h: total, rev: rev, of: 1 }];
+  var per = total / all.length, perRev = rev / all.length;
   var out = [];
   all.forEach(function(nm){
     var keep = isTech(nm) && activeOn(nm, r.d);
-    out.push({ name: keep ? nm : OTHER, h: per, of: all.length });
+    out.push({ name: keep ? nm : OTHER, h: per, rev: perRev, of: all.length });
   });
   return out;
 }
@@ -715,9 +723,10 @@ function buildGrid(days){
     shareOut(r).forEach(function(p){
       if (p.name === OTHER && !CFG.unassigned) return;
       if (!g[p.name]) g[p.name] = {};
-      if (!g[p.name][r.d]) g[p.name][r.d] = { h:0, jobs:[] };
+      if (!g[p.name][r.d]) g[p.name][r.d] = { h:0, rev:0, jobs:[] };
       g[p.name][r.d].h += p.h;
-      g[p.name][r.d].jobs.push({ r:r, share:1/p.of, h:p.h });
+      g[p.name][r.d].rev += p.rev;
+      g[p.name][r.d].jobs.push({ r:r, share:1/p.of, h:p.h, rev:p.rev });
     });
   });
   return g;
@@ -857,7 +866,10 @@ function render(){
       /* round to the displayed 0.1 h first, so the $ column always equals
          the hours you can see × the rate (the sheet works this way) */
       var hh = cell ? Math.round(cell.h * 10) / 10 : 0;
-      var mm = hh * rateFor(unitOf(n === OTHER ? null : unitOfTech(n)));
+      /* $ is the money actually booked (net of discounts), NOT hours x rate —
+         hours are deliberately rounded down and lights convert at their own
+         rate, so deriving $ from them understated revenue against Jobber. */
+      var mm = cell ? cell.rev : 0;
       dayH += hh; dayM += mm;
       wkH[n] = (wkH[n]||0) + hh; wkM[n] = (wkM[n]||0) + mm;
 
@@ -969,7 +981,7 @@ function openDrawer(tech, day, g){
   /* same 0.1 h rounding as the grid, so the drawer reconciles with the cell */
   var cellH = Math.round(cell.h * 10) / 10;
   document.getElementById('dSub').textContent =
-    fmtDay(parseYmd(day)) + ' · ' + hrs(cellH) + ' h · ' + money(cellH * rateFor(unitOf(tech === OTHER ? null : unitOfTech(tech))));
+    fmtDay(parseYmd(day)) + ' · ' + hrs(cellH) + ' h · ' + money(cell.rev);
 
   var jobs = cell.jobs.slice().sort(function(a,b){ return b.h - a.h; });
   var html = '';
@@ -1037,7 +1049,7 @@ function openDrawer(tech, day, g){
     if (r.disc > 0) meta.push('discount of ' + money(r.disc) + ' excluded');
     var jh = Math.round(j.h * 10) / 10;
     html += '<div class="job">' +
-      '<div class="n">' + hrs(jh) + ' h<br><span style="color:var(--muted);font-size:12px">' + money(jh * rateFor(unitOf(r.u))) + '</span></div>' +
+      '<div class="n">' + hrs(jh) + ' h<br><span style="color:var(--muted);font-size:12px">' + money(j.rev) + '</span></div>' +
       '<div class="t">' + esc(r.cl || 'Client') + ' <span style="color:var(--muted);font-weight:400">#' + esc(r.jn) + '</span>' + tags + '</div>' +
       '<div class="m">' + (r.ti ? esc(r.ti) + '<br>' : '') + meta.join(' · ') + '</div>' +
       '</div>';
