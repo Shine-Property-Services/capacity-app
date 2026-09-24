@@ -1337,6 +1337,7 @@ function quotesHtml(){
 '.empty{padding:40px;text-align:center;color:#61748a}' +
 '.note{margin:16px 0 0;font-size:12px;color:#61748a;line-height:1.6}' +
 '.picked.done{color:#0b7a55}.picked.done a{margin-left:4px}' +
+'.cok{color:#0b7a55;font-weight:600}.cwarn{color:#a35a00;font-weight:600}' +
 '#cfm{position:fixed;inset:0;background:rgba(1,53,93,.45);display:none;align-items:center;justify-content:center;z-index:50}' +
 '#cfm.on{display:flex}' +
 '#cfm .box{background:#fff;border-radius:12px;padding:22px 24px;width:min(460px,92vw);box-shadow:0 24px 60px rgba(1,53,93,.35)}' +
@@ -1360,7 +1361,7 @@ function quotesHtml(){
 '<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour.<br>' +
 '<b>Where it fits</b> shows open slots over the next <b>3 weeks</b>, soonest first. Each names the technician and a real time — crews start <b>08:30</b> (<b>' + esc(CFG.outOfTownStart || '09:00') + '</b> out of town), jobs keep <b>30 minutes</b> between them, and the time picked is the one that <b>adds the least driving</b>. Only genuine gaps are offered, so booking one moves nothing else.<br>' +
 (BOOK_URL
-  ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit.'
+  ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit. Jobber sends the client their own booking confirmation; the row reports whether it actually went out.'
   : 'Picking a slot is a note to yourself; booking needs the hosted app.') + '</p>' +
 '</div>' +
 '<div id="cfm"><div class="box"><h3>Book this job?</h3><div id="cfmBody"></div>' +
@@ -1408,8 +1409,12 @@ function quotesHtml(){
 'document.getElementById("cfm").classList.remove("on");' +
 'var cell=document.getElementById("p-"+q.qn);' +
 'cell.className="picked done";' +
+'var conf=res.confirmationSentAt' +
+'?"<span class=\\"cok\\">client confirmation sent</span>"' +
+':"<span class=\\"cwarn\\">no client confirmation recorded — check Jobber</span>";' +
 'cell.innerHTML="Booked as job #"+res.jobNumber+" — "+slot.tech+", "+slot.day+" "+slot.start+"–"+slot.end+' +
-'(res.url?" &middot; <a href=\\""+res.url+"\\" target=\\"_blank\\" rel=\\"noopener\\">open in Jobber ↗</a>":"");' +
+'(res.url?" &middot; <a href=\\""+res.url+"\\" target=\\"_blank\\" rel=\\"noopener\\">open in Jobber ↗</a>":"")+' +
+'"<br>"+conf;' +
 'if(sel){sel.disabled=true;sel.style.display="none"}' +
 'pend=null;' +
 '}).catch(function(err){b.disabled=false;b.textContent="Book in Jobber";' +
