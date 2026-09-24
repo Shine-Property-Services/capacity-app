@@ -305,6 +305,16 @@
     <button id="resetDows" style="border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 11px;cursor:pointer;font-family:inherit;font-size:13px;color:var(--navy)">Re-detect from Jobber</button>
     <div class="hint">discards your manual edits</div>
   </div>
+  <div class="fld">
+    <label>Out-of-town start</label>
+    <input type="time" id="sOotStart" style="border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:13.5px;font-family:inherit;color:var(--ink)">
+    <div class="hint">in town it is 08:30</div>
+  </div>
+  <div class="fld" style="flex:1; min-width:260px">
+    <label>Out-of-town areas</label>
+    <input type="text" id="sOotAreas" style="border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:13.5px;font-family:inherit;color:var(--ink);width:100%">
+    <div class="hint">matched against the address; around PG anything off the map counts too</div>
+  </div>
   <div class="fld" style="flex:1; min-width:260px">
     <label>Not technicians</label>
     <input type="text" id="sNonTechs" style="border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:13.5px;font-family:inherit;color:var(--ink);width:100%">
@@ -406,6 +416,7 @@ var OTHER = '(unassigned / other staff)';
 
 var CFG = {
   rate: 160, xrate: 320, xmode: 'line', weeks: 6, maxDrive: 20,
+  outOfTownStart: '09:00', outOfTown: null,
   targets: {},                 /* per location: { 'Victoria': 8, 'Prince George': 8 } */
   nonTechs: NON_TECHS_DEFAULT.slice(),
   /* unit: '' = not chosen yet (default to the first location); null = All */
@@ -482,7 +493,7 @@ try { DOW = JSON.parse(localStorage.getItem(LS_DOW) || '{}'); } catch (e) {}
    (rate, Christmas divisor, targets, who counts as a technician, the roster
    and working days) is stored server-side and shared. Only where you happen
    to be looking — which location, which weeks — stays personal.            */
-var SHARED_KEYS = ['rate','xrate','rates','xrates','xmode','targets','nonTechs','recur','unassigned','maxDrive'];
+var SHARED_KEYS = ['rate','xrate','rates','xrates','xmode','outOfTownStart','outOfTown','targets','nonTechs','recur','unassigned','maxDrive'];
 var API = window.__CAPACITY_API || null;
 function apiUrl(action){
   if (!API) return null;
@@ -1070,9 +1081,31 @@ function quoteHours(q){
    Crews start at 08:30 and leave 30 minutes between the end of one job and the
    start of the next (travel + setup). A job is slotted into whichever gap adds
    the least driving, using the same straight-line estimate as the route check. */
-var DAY_START_MIN = 8 * 60 + 30;       // 08:30
+var DAY_START_MIN = 8 * 60 + 30;       // 08:30 in town
 var GAP_MIN = 30;                      // required break between jobs
 var DAY_END_MIN = 18 * 60;             // don't start work that runs past 18:00
+var QUOTE_HORIZON_DAYS = 21;           // only suggest slots 3 weeks out
+/* Out-of-town work starts later to allow the drive. Around Prince George the
+   neighbourhood map already tells us — an address with no area code is outside
+   the city. Victoria has no map, so those communities are listed by name. */
+var OUT_OF_TOWN_DEFAULT = ['Mill Bay','Duncan','Cowichan','Youbou','Sooke','Cobble Hill','Shawnigan','Ladysmith','Chemainus','Malahat'];
+function isOutOfTown(q){
+  var list = (CFG.outOfTown && CFG.outOfTown.length) ? CFG.outOfTown : OUT_OF_TOWN_DEFAULT;
+  var ad = String(q.ad || '').toLowerCase();
+  for (var i = 0; i < list.length; i++) {
+    var t = String(list[i]).trim().toLowerCase();
+    if (t && ad.indexOf(t) >= 0) return true;
+  }
+  /* Prince George: no area code means the map didn't cover it, i.e. out of town
+     (Vanderhoof, Quesnel, Cluculz Lake). Victoria has no map, so this can't apply. */
+  if (q.u === 'Prince George' && !q.nb) return true;
+  return false;
+}
+function dayStartFor(q){
+  if (!isOutOfTown(q)) return DAY_START_MIN;
+  var m = hhmmToMin(CFG.outOfTownStart || '09:00');
+  return (m === null) ? 9 * 60 : m;
+}
 function hhmmToMin(s){
   if (!s) return null;
   var p = String(s).split(':');
@@ -1109,9 +1142,10 @@ function bestTimeFor(quote, unit, tech, day, need){
   var mins = Math.round(need * 60);
   var q = { la: quote.la, lo: quote.lo };
   var best = null;
+  var earliest = dayStartFor(quote);
   function consider(startMin, prev, next){
+    if (startMin < earliest) startMin = earliest;     // never start before the day opens
     var endMin = startMin + mins;
-    if (startMin < DAY_START_MIN) return;
     if (endMin > DAY_END_MIN) return;
     if (next && endMin + GAP_MIN > next.s) return;      // would run into the next job
     var added = 0;
@@ -1123,9 +1157,9 @@ function bestTimeFor(quote, unit, tech, day, need){
     }
   }
   if (!stops.length) {
-    consider(DAY_START_MIN, null, null);
+    consider(earliest, null, null);
   } else {
-    consider(DAY_START_MIN, null, stops[0]);                       // first job of the day
+    consider(earliest, null, stops[0]);                             // first job of the day
     for (var i = 0; i < stops.length; i++) {
       var prev = stops[i], next = stops[i + 1] || null;
       consider(prev.e + GAP_MIN, prev, next);                      // after this one
@@ -1171,9 +1205,12 @@ function forwardGrid(unit, days){
 function quoteSlots(q, limit){
   var need = quoteHours(q);
   var today = ymd(new Date());
-  var lastDay = (DATA && DATA.to) ? DATA.to : ymd(addDays(new Date(), 120));
+  /* three weeks is as far ahead as the crew plans — beyond that the day is
+     empty anyway and the list fills with meaningless "wide open" options */
+  var horizon = ymd(addDays(new Date(), QUOTE_HORIZON_DAYS));
+  var lastDay = (DATA && DATA.to && DATA.to < horizon) ? DATA.to : horizon;
   var days = [];
-  for (var d = parseYmd(today); ymd(d) <= lastDay && days.length < 200; d = addDays(d, 1)) days.push(ymd(d));
+  for (var d = parseYmd(today); ymd(d) <= lastDay; d = addDays(d, 1)) days.push(ymd(d));
   var g = forwardGrid(q.u, days);
   var techs = allTechNames().filter(function(n){ return unitOfTech(n) === q.u; });
   var qNb = q.nb ? String(q.nb).replace(/~$/,'') : null;
@@ -1224,6 +1261,7 @@ function quotesHtml(){
     var nb = q.nb
       ? '<span class="nb' + (/~$/.test(q.nb) ? ' near' : '') + '">' + esc(String(q.nb).replace(/~$/,'')) + '</span>'
       : '<span class="nb none">no area</span>';
+    if (isOutOfTown(q)) nb += ' <span class="oot">out of town</span>';
     var opts = r.slots.map(function(s, i){
       var d = parseYmd(s.day);
       /* technician is named in every option — that is the whole point of the
@@ -1275,6 +1313,7 @@ function quotesHtml(){
 '.need{font-weight:700;color:#01355d}' +
 '.nb{display:inline-block;background:#01355d;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:2px 7px;border-radius:5px}' +
 '.nb.near{background:#e7ecf2;color:#61748a}.nb.none{background:#f1f3f6;color:#9aa7b5}' +
+'.oot{display:inline-block;background:#fff4e0;color:#a35a00;font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;margin-top:4px}' +
 'select{width:100%;max-width:430px;border:1px solid #dbe3ec;border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px;background:#fff}' +
 '.nofit{font-size:12.5px;color:#b3251a;background:#fdecea;border-radius:7px;padding:8px 10px}' +
 '.picked{font-size:12.5px;color:#0b7a55;font-weight:600;margin-top:6px}' +
@@ -1290,7 +1329,7 @@ function quotesHtml(){
  ? '<table><thead><tr><th>Client</th><th>Area</th><th>Value</th><th>Hours</th><th>Where it fits</th><th></th></tr></thead><tbody>' + body + '</tbody></table>'
  : '<div class="empty">No approved quotes waiting to be scheduled.</div>') +
 '<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour.<br>' +
-'<b>Where it fits</b> lists every technician and day that can actually take the job, <b>soonest first</b>. Each option shows the <b>best time in that day</b> — crews start at 08:30, jobs keep 30 minutes between them, and the slot chosen is the one that adds the least driving. Within a day the most efficient option is listed first.<br>' +
+'<b>Where it fits</b> shows open slots over the next <b>3 weeks</b>, soonest first. Each names the technician and a real time — crews start <b>08:30</b> (<b>' + esc(CFG.outOfTownStart || '09:00') + '</b> out of town), jobs keep <b>30 minutes</b> between them, and the time picked is the one that <b>adds the least driving</b>. Only genuine gaps are offered, so booking one moves nothing else.<br>' +
 'Picking a slot is a note to yourself — it is remembered here but <b>does not book anything in Jobber</b>. Use the Jobber link to make it real.</p>' +
 '</div><script>' +
 'document.addEventListener("change",function(e){' +
@@ -1605,6 +1644,19 @@ function boot(data){
   }
   rateInputs('sRates', 'rates', 'rate', 160);
   rateInputs('sXrates', 'xrates', 'xrate', 320);
+
+  /* out-of-town start time + the communities that count as out of town */
+  var oot = document.getElementById('sOotStart');
+  oot.value = CFG.outOfTownStart || '09:00';
+  oot.addEventListener('change', function(){
+    CFG.outOfTownStart = oot.value || '09:00'; saveCfg(); render();
+  });
+  var oa = document.getElementById('sOotAreas');
+  oa.value = ((CFG.outOfTown && CFG.outOfTown.length) ? CFG.outOfTown : OUT_OF_TOWN_DEFAULT).join(', ');
+  oa.addEventListener('change', function(){
+    CFG.outOfTown = oa.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+    saveCfg(); render();
+  });
 
   /* excluded (non-technician) names */
   var nt = document.getElementById('sNonTechs');
