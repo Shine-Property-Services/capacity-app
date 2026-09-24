@@ -1242,12 +1242,20 @@ function quoteSlots(q, limit){
   return { need: need, slots: out.slice(0, limit || 20), total: out.length };
 }
 
+/* booking runs server-side; the page only ever calls this gated endpoint */
+function bookUrl(){
+  if (!API) return null;
+  return API.replace('/capacity-board', '/capacity-book')
+            .replace('&format=json', '').replace('?format=json', '');
+}
 function quotesHtml(){
+  var BOOK_URL = bookUrl();
   var all = (DATA && DATA.quotes) ? DATA.quotes : [];
   var list = all.filter(function(q){ return !CFG.unit || q.u === CFG.unit; });
   var plan = {};
   try { plan = JSON.parse(localStorage.getItem(LS_QPLAN) || '{}'); } catch(e){}
 
+  var qmap = {};
   var rows = list.map(function(q){
     var r = quoteSlots(q, 25);
     return { q: q, need: r.need, slots: r.slots, total: r.total };
@@ -1262,6 +1270,14 @@ function quotesHtml(){
       ? '<span class="nb' + (/~$/.test(q.nb) ? ' near' : '') + '">' + esc(String(q.nb).replace(/~$/,'')) + '</span>'
       : '<span class="nb none">no area</span>';
     if (isOutOfTown(q)) nb += ' <span class="oot">out of town</span>';
+    /* everything the booking call needs, keyed by quote number */
+    qmap[q.qn] = {
+      id: q.id || null, u: q.u, cl: q.cl || 'Client', qn: q.qn,
+      title: jobTitleFor(q, r.need, 1), need: r.need,
+      slots: r.slots.map(function(s){
+        return { tech: s.tech, day: s.day, start: s.time.start, end: s.time.end };
+      })
+    };
     var opts = r.slots.map(function(s, i){
       var d = parseYmd(s.day);
       /* technician is named in every option — that is the whole point of the
@@ -1272,7 +1288,7 @@ function quotesHtml(){
         ' — ' + s.time.start + '–' + s.time.end +
         (s.time.addedDrive ? ' — +' + s.time.addedDrive + ' min driving' : ' — no extra driving') +
         (s.sameArea ? ' — already in ' + String(q.nb).replace(/~$/,'') : '');
-      var val = s.day + '|' + s.tech;
+      var val = String(i);
       return '<option value="' + esc(val) + '"' + (plan[q.qn] === val ? ' selected' : '') + '>' + esc(lbl) + '</option>';
     }).join('');
     var none = !r.slots.length
@@ -1320,6 +1336,19 @@ function quotesHtml(){
 'a{color:#0fb3ae;font-size:12.5px;font-weight:600;text-decoration:none;white-space:nowrap}a:hover{text-decoration:underline}' +
 '.empty{padding:40px;text-align:center;color:#61748a}' +
 '.note{margin:16px 0 0;font-size:12px;color:#61748a;line-height:1.6}' +
+'.picked.done{color:#0b7a55}.picked.done a{margin-left:4px}' +
+'#cfm{position:fixed;inset:0;background:rgba(1,53,93,.45);display:none;align-items:center;justify-content:center;z-index:50}' +
+'#cfm.on{display:flex}' +
+'#cfm .box{background:#fff;border-radius:12px;padding:22px 24px;width:min(460px,92vw);box-shadow:0 24px 60px rgba(1,53,93,.35)}' +
+'#cfm h3{margin:0 0 10px;color:#01355d;font-size:16px}' +
+'#cfm p{margin:0 0 12px;font-size:13px;color:#61748a}' +
+'#cfm dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}' +
+'#cfm dt{color:#61748a}#cfm dd{margin:0;font-weight:600;color:#12212e}' +
+'#cfm code{font-family:ui-monospace,Menlo,monospace;background:#eef3f8;padding:2px 6px;border-radius:4px;font-size:12px}' +
+'#cfm .acts{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}' +
+'#cfm button{border-radius:8px;padding:9px 18px;font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid #dbe3ec;background:#fff;color:#61748a}' +
+'#cfmYes{background:#01355d;border-color:#01355d;color:#fff}#cfmYes:disabled{opacity:.6;cursor:default}' +
+'#cfmErr{color:#b3251a;font-size:12.5px;margin-top:10px;min-height:1em}' +
 '</style></head><body>' +
 '<header><h1>Approved quotes <span>to schedule</span></h1>' +
 '<div class="meta">' + list.length + ' quote' + (list.length===1?'':'s') + ' · ' + money(totalValue) +
@@ -1330,16 +1359,61 @@ function quotesHtml(){
  : '<div class="empty">No approved quotes waiting to be scheduled.</div>') +
 '<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour.<br>' +
 '<b>Where it fits</b> shows open slots over the next <b>3 weeks</b>, soonest first. Each names the technician and a real time — crews start <b>08:30</b> (<b>' + esc(CFG.outOfTownStart || '09:00') + '</b> out of town), jobs keep <b>30 minutes</b> between them, and the time picked is the one that <b>adds the least driving</b>. Only genuine gaps are offered, so booking one moves nothing else.<br>' +
-'Picking a slot is a note to yourself — it is remembered here but <b>does not book anything in Jobber</b>. Use the Jobber link to make it real.</p>' +
-'</div><script>' +
+(BOOK_URL
+  ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit.'
+  : 'Picking a slot is a note to yourself; booking needs the hosted app.') + '</p>' +
+'</div>' +
+'<div id="cfm"><div class="box"><h3>Book this job?</h3><div id="cfmBody"></div>' +
+'<div class="acts"><button id="cfmNo">Cancel</button><button id="cfmYes">Book in Jobber</button></div>' +
+'<div id="cfmErr"></div></div></div>' +
+'<script>' +
+'var QUOTES=' + JSON.stringify(qmap).replace(/</g, '\\u003c') + ';' +
+'var BOOK_URL=' + JSON.stringify(BOOK_URL) + ';' +
+'var pend=null;' +
+'function money(n){return "$"+Math.round(n).toLocaleString("en-CA")}' +
+'function show(q,slot,sel){' +
+'pend={q:q,slot:slot,sel:sel};' +
+'document.getElementById("cfmBody").innerHTML=' +
+'"<p>This creates a job in Jobber and books it. It cannot be undone from here.</p>"+' +
+'"<dl><dt>Client</dt><dd>"+q.cl+" &middot; quote #"+q.qn+"</dd>"+' +
+'"<dt>Technician</dt><dd>"+slot.tech+"</dd>"+' +
+'"<dt>When</dt><dd>"+slot.day+" &middot; "+slot.start+"–"+slot.end+"</dd>"+' +
+'"<dt>Job title</dt><dd><code>"+q.title+"</code></dd></dl>";' +
+'document.getElementById("cfmErr").textContent="";' +
+'document.getElementById("cfmYes").disabled=false;' +
+'document.getElementById("cfmYes").textContent="Book in Jobber";' +
+'document.getElementById("cfm").classList.add("on");' +
+'}' +
+'function hide(){if(pend&&pend.sel)pend.sel.value="";pend=null;document.getElementById("cfm").classList.remove("on")}' +
 'document.addEventListener("change",function(e){' +
 'if(e.target.tagName!=="SELECT")return;' +
-'var q=e.target.getAttribute("data-q"),v=e.target.value;' +
-'var plan={};try{plan=JSON.parse(localStorage.getItem("' + LS_QPLAN + '")||"{}")}catch(x){}' +
-'if(v)plan[q]=v;else delete plan[q];' +
-'try{localStorage.setItem("' + LS_QPLAN + '",JSON.stringify(plan))}catch(x){}' +
-'var el=document.getElementById("p-"+q);' +
-'el.textContent=v?("Pencilled in — "+e.target.options[e.target.selectedIndex].text):"";' +
+'var qn=e.target.getAttribute("data-q"),v=e.target.value;' +
+'if(v==="")return;' +
+'var q=QUOTES[qn];if(!q)return;' +
+'var slot=q.slots[+v];if(!slot)return;' +
+'if(!BOOK_URL){document.getElementById("p-"+qn).textContent="Pencilled in — "+e.target.options[e.target.selectedIndex].text;return}' +
+'show(q,slot,e.target);' +
+'});' +
+'document.getElementById("cfmNo").addEventListener("click",hide);' +
+'document.getElementById("cfmYes").addEventListener("click",function(){' +
+'if(!pend)return;' +
+'var b=this;b.disabled=true;b.textContent="Booking…";' +
+'var q=pend.q,slot=pend.slot,sel=pend.sel;' +
+'fetch(BOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},' +
+'body:JSON.stringify({unit:q.u,quoteId:q.id,tech:slot.tech,day:slot.day,start:slot.start,end:slot.end,title:q.title})})' +
+'.then(function(r){return r.json()})' +
+'.then(function(res){' +
+'if(!res.ok){b.disabled=false;b.textContent="Book in Jobber";' +
+'document.getElementById("cfmErr").textContent=res.error||"Booking failed";return}' +
+'document.getElementById("cfm").classList.remove("on");' +
+'var cell=document.getElementById("p-"+q.qn);' +
+'cell.className="picked done";' +
+'cell.innerHTML="Booked as job #"+res.jobNumber+" — "+slot.tech+", "+slot.day+" "+slot.start+"–"+slot.end+' +
+'(res.url?" &middot; <a href=\\""+res.url+"\\" target=\\"_blank\\" rel=\\"noopener\\">open in Jobber ↗</a>":"");' +
+'if(sel){sel.disabled=true;sel.style.display="none"}' +
+'pend=null;' +
+'}).catch(function(err){b.disabled=false;b.textContent="Book in Jobber";' +
+'document.getElementById("cfmErr").textContent="Booking failed: "+err.message});' +
 '});' +
 '<\/script></body></html>';
 
