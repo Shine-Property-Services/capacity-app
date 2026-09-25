@@ -1074,12 +1074,15 @@ var LS_QPLAN = 'shine_cap_qplan';
 /* keep the header count in step with the location filter */
 function updateQuotesBtn(){
   var b = document.getElementById('quotesBtn');
-  if (!b || b.style.display === 'none') return;
+  if (!b) return;
   var all = (DATA && DATA.quotes) ? DATA.quotes : [];
   var n = all.filter(function(q){ return !CFG.unit || q.u === CFG.unit; }).length;
   b.textContent = 'Approved quotes (' + n + ')';
   b.disabled = n === 0;
-  b.style.opacity = n === 0 ? 0.5 : 1;
+  b.style.opacity = n === 0 ? 0.55 : 1;
+  b.title = n === 0
+    ? 'Nothing approved and waiting to be scheduled' + (CFG.unit ? ' in ' + CFG.unit : '')
+    : n + ' approved quote' + (n === 1 ? '' : 's') + ' to schedule';
 }
 function quoteHours(q){
   var amt = +q.amt || 0, x = +q.x || 0;
@@ -1667,12 +1670,12 @@ function boot(data){
     });
   });
 
+  /* Always show the button — greying it at (0) reads as "nothing to schedule",
+     whereas hiding it looks like the feature broke. */
   var qb = document.getElementById('quotesBtn');
-  if ((data.quotes || []).length) {
-    qb.style.display = '';
-    qb.addEventListener('click', openQuotes);
-    updateQuotesBtn();
-  }
+  qb.style.display = '';
+  qb.addEventListener('click', openQuotes);
+  updateQuotesBtn();
 
   /* "Sync now" only makes sense against the hosted API, not a local data.js */
   if (API) {
