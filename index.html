@@ -1111,6 +1111,36 @@ document.getElementById('backdrop').addEventListener('click', function(){ closeD
    For each one we work out how many hours it needs (same rules as a booked
    job) and then list every day/tech that still has room for it.            */
 var LS_QPLAN = 'shine_cap_qplan';
+var VICTORIA_AREA_RULES = [
+  { name:'Saanich', terms:['brentwood bay','central saanich','saanich'] },
+  { name:'Vic Town', terms:['view royal','royal oak','esquimalt','oak bay','victoria'] },
+  { name:'Langford', terms:['langford'] },
+  { name:'Metchosin', terms:['metchosin'] },
+  { name:'Sooke', terms:['sooke'] },
+  { name:'Duncan', terms:['duncan'] },
+  { name:'Cowichan Valley', terms:['cowichan valley'] },
+  { name:'Cowichan', terms:['cowichan'] },
+  { name:'Chemainus', terms:['chemainus'] },
+  { name:'Ladysmith', terms:['ladysmith'] },
+  { name:'Salt Spring', terms:['salt spring'] },
+  { name:'Cobble Hill', terms:['cobble hill'] },
+];
+function areaOf(item){
+  if (item.nb) return String(item.nb).replace(/~$/, '');
+  if (item.u !== 'Victoria') return '';
+  var address = String(item.ad || '').toLowerCase();
+  for (var index = 0; index < VICTORIA_AREA_RULES.length; index++) {
+    var rule = VICTORIA_AREA_RULES[index];
+    for (var termIndex = 0; termIndex < rule.terms.length; termIndex++) {
+      if (address.indexOf(rule.terms[termIndex]) >= 0) return rule.name;
+    }
+  }
+  return '';
+}
+function quoteWithArea(quote){
+  var area = areaOf(quote);
+  return area && area !== quote.nb ? Object.assign({}, quote, { nb:area }) : quote;
+}
 /* keep the header count in step with the location filter */
 function updateQuotesBtn(){
   var b = document.getElementById('quotesBtn');
@@ -1249,7 +1279,8 @@ function forwardGrid(unit, days){
       if (!g[p.name]) g[p.name] = {};
       if (!g[p.name][r.d]) g[p.name][r.d] = { h:0, nbs:{} };
       g[p.name][r.d].h += p.h;
-      if (r.nb) g[p.name][r.d].nbs[String(r.nb).replace(/~$/,'')] = 1;
+      var area = areaOf(r);
+      if (area) g[p.name][r.d].nbs[area] = 1;
     });
   });
   return g;
@@ -1307,7 +1338,7 @@ function bookUrl(){
 function quotesHtml(){
   var BOOK_URL = bookUrl();
   var all = (DATA && DATA.quotes) ? DATA.quotes : [];
-  var list = all.filter(function(q){ return !CFG.unit || q.u === CFG.unit; });
+  var list = all.filter(function(q){ return !CFG.unit || q.u === CFG.unit; }).map(quoteWithArea);
   var plan = {};
   try { plan = JSON.parse(localStorage.getItem(LS_QPLAN) || '{}'); } catch(e){}
 
