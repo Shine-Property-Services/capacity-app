@@ -1406,6 +1406,7 @@ function quotesHtml(){
 '#cfm button{border-radius:8px;padding:9px 18px;font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid #dbe3ec;background:#fff;color:#61748a}' +
 '#cfmYes{background:#01355d;border-color:#01355d;color:#fff}#cfmYes:disabled{opacity:.6;cursor:default}' +
 '#cfmErr{color:#b3251a;font-size:12.5px;margin-top:10px;min-height:1em}' +
+'#cfm .send{margin-top:16px;padding:11px 12px;border:1px solid #dbe3ec;border-radius:8px;background:#f8fbfd;font-size:12.5px;color:#12212e}#cfm .send b{display:block;margin-bottom:6px;color:#01355d}#cfm .send label{margin-right:14px;white-space:nowrap}' +
 '</style></head><body>' +
 '<header><h1>Approved quotes <span>to schedule</span></h1>' +
 '<div class="meta">' + list.length + ' quote' + (list.length===1?'':'s') + ' · ' + money(totalValue) +
@@ -1417,7 +1418,7 @@ function quotesHtml(){
 '<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour.<br>' +
 '<b>Where it fits</b> shows open slots over the next <b>3 weeks</b>, soonest first. Each names the technician and a real time — crews start <b>08:30</b> (<b>' + esc(CFG.outOfTownStart || '09:00') + '</b> out of town), jobs keep <b>30 minutes</b> between them, and the time picked is the one that <b>adds the least driving</b>. Only genuine gaps are offered, so booking one moves nothing else.<br>' +
 (BOOK_URL
-  ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit. Jobber sends the client their own booking confirmation; the row reports whether it actually went out.'
+  ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit. You can optionally send a Shine confirmation by text, email, or both when the customer has a matching GHL contact.'
   : 'Picking a slot is a note to yourself; booking needs the hosted app.') + '</p>' +
 '</div>' +
 '<div id="cfm"><div class="box"><h3>Book this job?</h3><div id="cfmBody"></div>' +
@@ -1435,7 +1436,8 @@ function quotesHtml(){
 '"<dl><dt>Client</dt><dd>"+q.cl+" &middot; quote #"+q.qn+"</dd>"+' +
 '"<dt>Technician</dt><dd>"+slot.tech+"</dd>"+' +
 '"<dt>When</dt><dd>"+slot.day+" &middot; "+slot.start+"–"+slot.end+"</dd>"+' +
-'"<dt>Job title</dt><dd><code>"+q.title+"</code></dd></dl>";' +
+'"<dt>Job title</dt><dd><code>"+q.title+"</code></dd></dl>"+' +
+'"<div class=\\"send\\"><b>Send Shine confirmation after booking</b><label><input type=\\"checkbox\\" id=\\"cfmSms\\"> Text message</label><label><input type=\\"checkbox\\" id=\\"cfmEmail\\"> Email</label></div>";' +
 'document.getElementById("cfmErr").textContent="";' +
 'document.getElementById("cfmYes").disabled=false;' +
 'document.getElementById("cfmYes").textContent="Book in Jobber";' +
@@ -1457,7 +1459,7 @@ function quotesHtml(){
 'var b=this;b.disabled=true;b.textContent="Booking…";' +
 'var q=pend.q,slot=pend.slot,sel=pend.sel;' +
 'fetch(BOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},' +
-'body:JSON.stringify({unit:q.u,quoteId:q.id,tech:slot.tech,day:slot.day,start:slot.start,end:slot.end,title:q.title})})' +
+'body:JSON.stringify({unit:q.u,quoteId:q.id,tech:slot.tech,day:slot.day,start:slot.start,end:slot.end,title:q.title,messageChannels:{sms:document.getElementById("cfmSms").checked,email:document.getElementById("cfmEmail").checked}})})' +
 '.then(function(r){return r.json()})' +
 '.then(function(res){' +
 'if(!res.ok){b.disabled=false;b.textContent="Book in Jobber";' +
@@ -1465,12 +1467,11 @@ function quotesHtml(){
 'document.getElementById("cfm").classList.remove("on");' +
 'var cell=document.getElementById("p-"+q.qn);' +
 'cell.className="picked done";' +
-'var conf=res.confirmationSentAt' +
-'?"<span class=\\"cok\\">client confirmation sent</span>"' +
-':"<span class=\\"cwarn\\">no client confirmation recorded — check Jobber</span>";' +
+'var confirmations=res.confirmations||{},delivery=[];' +
+'["sms","email"].forEach(function(channel){var item=confirmations[channel];if(!item)return;var label=channel==="sms"?"Text":"Email",state=item.status==="sent"?"confirmation queued":(item.status==="skipped"?"confirmation skipped":"confirmation failed");delivery.push("<span class=\\""+(item.status==="sent"?"cok":"cwarn")+"\\">"+label+" "+state+"</span>")});' +
 'cell.innerHTML="Booked as job #"+res.jobNumber+" — "+slot.tech+", "+slot.day+" "+slot.start+"–"+slot.end+' +
 '(res.url?" &middot; <a href=\\""+res.url+"\\" target=\\"_blank\\" rel=\\"noopener\\">open in Jobber ↗</a>":"")+' +
-'"<br>"+conf;' +
+'(delivery.length?"<br>"+delivery.join("<br>"):"");' +
 'if(sel){sel.disabled=true;sel.style.display="none"}' +
 'pend=null;' +
 '}).catch(function(err){b.disabled=false;b.textContent="Book in Jobber";' +
