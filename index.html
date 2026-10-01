@@ -269,6 +269,7 @@
   <div class="sync" id="syncInfo">loading…</div>
   <span class="savestate" id="saveState"></span>
   <button class="btn primary" id="quotesBtn" style="display:none">Approved quotes</button>
+  <button class="btn primary" id="unassignedBtn" style="display:none">Unassigned jobs</button>
   <button class="btn" id="syncBtn" style="display:none">Sync now</button>
   <button class="btn" id="rosterBtn">Technicians</button>
   <button class="btn" id="cfgBtn">Settings</button>
@@ -842,6 +843,7 @@ function render(){
     fmtDay(start).replace(/^\w+ /,'') + '  →  ' + fmtDay(addDays(start, CFG.weeks*7-1)).replace(/^\w+ /,'');
 
   updateQuotesBtn();
+  updateUnassignedBtn();
 
   var t = document.getElementById('grid');
   var h = '';
@@ -1153,6 +1155,22 @@ function updateQuotesBtn(){
   b.title = n === 0
     ? 'Nothing approved and waiting to be scheduled' + (CFG.unit ? ' in ' + CFG.unit : '')
     : n + ' approved quote' + (n === 1 ? '' : 's') + ' to schedule';
+}
+function unassignedRows(){
+  return ROWS.filter(function(r){
+    return !(r.t || []).length && r.vid && (!CFG.unit || r.u === CFG.unit);
+  });
+}
+function updateUnassignedBtn(){
+  var b = document.getElementById('unassignedBtn');
+  if (!b) return;
+  var n = unassignedRows().length;
+  b.textContent = 'Unassigned jobs (' + n + ')';
+  b.disabled = n === 0;
+  b.style.opacity = n === 0 ? 0.55 : 1;
+  b.title = n === 0
+    ? 'No unassigned scheduled jobs' + (CFG.unit ? ' in ' + CFG.unit : '')
+    : n + ' unassigned job' + (n === 1 ? '' : 's') + ' to schedule';
 }
 function quoteHours(q){
   var amt = +q.amt || 0, x = +q.x || 0;
@@ -1515,26 +1533,94 @@ function quotesHtml(){
   return html;
 }
 
-function openQuotes(){
-  var html = quotesHtml();
-  var w = window.open('', 'shine-approved-quotes', 'width=1180,height=860');
+function unassignedJobsHtml(){
+  var ASSIGN_URL = bookUrl();
+  var list = unassignedRows();
+  var plan = {};
+  try { plan = JSON.parse(localStorage.getItem('shine_cap_unassigned_plan') || '{}'); } catch(e){}
+  var jobs = list.map(function(job){
+    var slotSource = Object.assign({}, job, { nb: areaOf(job) || null });
+    var fit = quoteSlots(slotSource, 25);
+    return { job: job, area: areaOf(slotSource), jobHours: fit.jobHours, need: fit.need, slots: fit.slots, total: fit.total };
+  }).sort(function(a, b){ return a.job.d.localeCompare(b.job.d) || String(a.job.jn).localeCompare(String(b.job.jn)); });
+
+  var jobMap = {};
+  var body = jobs.map(function(entry){
+    var job = entry.job;
+    var area = entry.area
+      ? '<span class="nb">' + esc(entry.area) + '</span>'
+      : '<span class="nb none">no area</span>';
+    jobMap[job.vid] = {
+      id: job.vid, u: job.u, jn: job.jn, cl: job.cl || 'Client', ti: job.ti || '',
+      slots: entry.slots.map(function(slot){
+        return { tech: slot.tech, day: slot.day, start: slot.time.start, end: slot.time.end };
+      }),
+    };
+    var options = entry.slots.map(function(slot, index){
+      var date = parseYmd(slot.day);
+      var label = slot.tech + ' — ' + DOWS[(date.getDay()+6)%7] + ' ' + date.getDate() + ' ' +
+        ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][date.getMonth()] +
+        ' — ' + slot.time.start + '–' + slot.time.end +
+        (slot.time.addedDrive ? ' — +' + slot.time.addedDrive + ' min driving' : ' — no extra driving') +
+        (slot.sameArea ? ' — already in ' + entry.area : '');
+      return '<option value="' + index + '"' + (plan[job.vid] === String(index) ? ' selected' : '') + '>' + esc(label) + '</option>';
+    }).join('');
+    var noFit = !entry.slots.length
+      ? '<div class="nofit">No day has ' + hrs(entry.need) + ' h free — raise the target, add a tech, or split the job.</div>'
+      : '';
+    return '<tr>' +
+      '<td><b>' + esc(job.cl || 'Client') + '</b><div class="sub">#' + esc(job.jn) + (job.ti ? ' · ' + esc(job.ti) : '') + '</div><div class="sub">' + esc(job.ad || '') + '</div></td>' +
+      '<td>' + area + '</td>' +
+      '<td>' + esc(job.d) + ' · ' + esc(job.t0 || '—') + '–' + esc(job.t1 || '—') + '</td>' +
+      '<td class="num">' + hrs(entry.jobHours) + ' h<div class="sub">assigns ' + hrs(entry.need) + ' h</div></td>' +
+      '<td>' + (entry.slots.length
+        ? '<select data-v="' + esc(job.vid) + '"><option value="">' + entry.total + ' option' + (entry.total===1?'':'s') + ' — pick a slot…</option>' + options + '</select>'
+        : '') + noFit + '<div class="picked" id="p-' + esc(job.vid) + '"></div></td>' +
+      '</tr>';
+  }).join('');
+
+  return '<!doctype html><html><head><meta charset="utf-8"><title>Unassigned jobs</title><style>' +
+    'body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f4f7fa;color:#12212e;font-size:14px}' +
+    'header{background:linear-gradient(180deg,#01355d,#0a2c47);color:#fff;padding:16px 22px}h1{margin:0;font-size:17px}h1 span{color:#22d8d2}.meta{font-size:12.5px;color:#b9cde0;margin-top:5px}.wrap{padding:18px 22px}' +
+    'table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(1,53,93,.12)}th{background:#eef3f8;color:#61748a;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;text-align:left;padding:10px 12px}td{padding:12px;border-top:1px solid #eef3f8;vertical-align:top}.sub{font-size:12px;color:#61748a;margin-top:2px}.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.nb{display:inline-block;background:#01355d;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:2px 7px;border-radius:5px}.nb.none{background:#f1f3f6;color:#9aa7b5}select{width:100%;min-width:300px;border:1px solid #dbe3ec;border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px;background:#fff}.nofit{font-size:12.5px;color:#b3251a;background:#fdecea;border-radius:7px;padding:8px 10px}.picked{font-size:12.5px;color:#0b7a55;font-weight:600;margin-top:6px}.note{margin:16px 0 0;font-size:12px;color:#61748a;line-height:1.6}' +
+    '#cfm{position:fixed;inset:0;background:rgba(1,53,93,.45);display:none;align-items:center;justify-content:center;z-index:50}#cfm.on{display:flex}#cfm .box{background:#fff;border-radius:12px;padding:22px 24px;width:min(460px,92vw);box-shadow:0 24px 60px rgba(1,53,93,.35)}#cfm h3{margin:0 0 10px;color:#01355d;font-size:16px}#cfm p{margin:0 0 12px;font-size:13px;color:#61748a}#cfm dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}#cfm dt{color:#61748a}#cfm dd{margin:0;font-weight:600;color:#12212e}#cfm .acts{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}#cfm button{border-radius:8px;padding:9px 18px;font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid #dbe3ec;background:#fff;color:#61748a}#cfmYes{background:#01355d;border-color:#01355d;color:#fff}#cfmYes:disabled{opacity:.6;cursor:default}#cfmErr{color:#b3251a;font-size:12.5px;margin-top:10px;min-height:1em}' +
+    '</style></head><body><header><h1>Unassigned <span>jobs</span></h1><div class="meta">' + jobs.length + ' job' + (jobs.length===1?'':'s') + ' waiting for a technician</div></header><div class="wrap">' +
+    (jobs.length ? '<table><thead><tr><th>Client</th><th>Area</th><th>Current booking</th><th>Hours</th><th>Where it fits</th></tr></thead><tbody>' + body + '</tbody></table>' : '<p>No unassigned jobs are waiting for a technician.</p>') +
+    '<p class="note">Choose an option to assign the technician and reschedule the existing Jobber visit. The visit is rechecked immediately before changing it, so a job someone else has already assigned is left untouched. No customer confirmation is sent from this action.</p></div>' +
+    '<div id="cfm"><div class="box"><h3>Assign this job?</h3><div id="cfmBody"></div><div class="acts"><button id="cfmNo">Cancel</button><button id="cfmYes">Assign in Jobber</button></div><div id="cfmErr"></div></div></div><script>' +
+    'var JOBS=' + JSON.stringify(jobMap).replace(/</g, '\\u003c') + ';var ASSIGN_URL=' + JSON.stringify(ASSIGN_URL) + ';var pending=null;' +
+    'function show(job,slot,select){pending={job:job,slot:slot,select:select};document.getElementById("cfmBody").innerHTML="<p>This assigns a technician and reschedules the existing Jobber visit. It cannot be undone from here.</p><dl><dt>Client</dt><dd>"+job.cl+" &middot; job #"+job.jn+"</dd><dt>Technician</dt><dd>"+slot.tech+"</dd><dt>When</dt><dd>"+slot.day+" &middot; "+slot.start+"–"+slot.end+"</dd></dl>";document.getElementById("cfmErr").textContent="";document.getElementById("cfmYes").disabled=false;document.getElementById("cfmYes").textContent="Assign in Jobber";document.getElementById("cfm").classList.add("on")}' +
+    'function hide(){if(pending&&pending.select)pending.select.value="";pending=null;document.getElementById("cfm").classList.remove("on")}' +
+    'document.addEventListener("change",function(event){if(event.target.tagName!=="SELECT")return;var id=event.target.getAttribute("data-v"),value=event.target.value;if(value==="")return;var job=JOBS[id],slot=job&&job.slots[+value];if(!job||!slot)return;localStorage.setItem("shine_cap_unassigned_plan",JSON.stringify((function(){var saved={};try{saved=JSON.parse(localStorage.getItem("shine_cap_unassigned_plan")||"{}")}catch(_){ }saved[id]=value;return saved})()));show(job,slot,event.target)})' +
+    'document.getElementById("cfmNo").addEventListener("click",hide);document.getElementById("cfmYes").addEventListener("click",function(){if(!pending)return;var button=this;button.disabled=true;button.textContent="Assigning…";var job=pending.job,slot=pending.slot,select=pending.select;fetch(ASSIGN_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"assign-visit",unit:job.u,visitId:job.id,tech:slot.tech,day:slot.day,start:slot.start,end:slot.end})}).then(function(response){return response.json()}).then(function(result){if(!result.ok){button.disabled=false;button.textContent="Assign in Jobber";document.getElementById("cfmErr").textContent=result.error||"Assignment failed";return}document.getElementById("cfm").classList.remove("on");var cell=document.getElementById("p-"+job.id);cell.innerHTML="Assigned job #"+(result.jobNumber||job.jn)+" — "+slot.tech+", "+slot.day+" "+slot.start+"–"+slot.end+". Planner will refresh shortly.";if(select){select.disabled=true;select.style.display="none"}pending=null}).catch(function(error){button.disabled=false;button.textContent="Assign in Jobber";document.getElementById("cfmErr").textContent="Assignment failed: "+error.message})});' +
+    '<\\/script></body></html>';
+}
+
+function openPlannerPanel(html, windowName, title){
+  var w = window.open('', windowName, 'width=1180,height=860');
   if (w && w.document) {
     w.document.open(); w.document.write(html); w.document.close(); w.focus();
     return;
   }
-  /* Some browsers (and embedded/in-app ones) block pop-ups outright. Rather
-     than dead-ending, show the same page over the planner. */
   var back = document.getElementById('qOverlay');
   if (back) back.remove();
   back = document.createElement('div');
   back.id = 'qOverlay';
   back.innerHTML =
-    '<div class="qbar"><span>Approved quotes — your browser blocked the pop-up, ' +
+    '<div class="qbar"><span>' + esc(title) + ' — your browser blocked the pop-up, ' +
     'so it is shown here instead.</span><button id="qClose">Close</button></div>' +
     '<iframe></iframe>';
   document.body.appendChild(back);
   back.querySelector('iframe').srcdoc = html;
   back.querySelector('#qClose').addEventListener('click', function(){ back.remove(); });
+}
+
+function openQuotes(){
+  openPlannerPanel(quotesHtml(), 'shine-approved-quotes', 'Approved quotes');
+}
+
+function openUnassignedJobs(){
+  openPlannerPanel(unassignedJobsHtml(), 'shine-unassigned-jobs', 'Unassigned jobs');
 }
 
 /* ---------------- force a sync ------------------------------------------
@@ -1823,6 +1909,11 @@ function boot(data){
   qb.style.display = '';
   qb.addEventListener('click', openQuotes);
   updateQuotesBtn();
+  updateUnassignedBtn();
+
+  var ub = document.getElementById('unassignedBtn');
+  ub.style.display = '';
+  ub.addEventListener('click', openUnassignedJobs);
 
   /* "Sync now" only makes sense against the hosted API, not a local data.js */
   if (API) {
