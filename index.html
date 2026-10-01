@@ -1289,7 +1289,8 @@ function forwardGrid(unit, days){
    Within the same day we still prefer a tech already working that area (no
    extra driving), then whoever has the most room left. */
 function quoteSlots(q, limit){
-  var need = quoteHours(q);
+  var jobHours = quoteHours(q);
+  var need = Math.max(1, jobHours - 1);
   var today = ymd(new Date());
   /* three weeks is as far ahead as the crew plans — beyond that the day is
      empty anyway and the list fills with meaningless "wide open" options */
@@ -1326,7 +1327,7 @@ function quoteSlots(q, limit){
     if (a.sameArea !== b.sameArea) return a.sameArea ? -1 : 1;
     return b.free - a.free;
   });
-  return { need: need, slots: out.slice(0, limit || 20), total: out.length };
+  return { jobHours: jobHours, need: need, slots: out.slice(0, limit || 20), total: out.length };
 }
 
 /* booking runs server-side; the page only ever calls this gated endpoint */
@@ -1345,11 +1346,11 @@ function quotesHtml(){
   var qmap = {};
   var rows = list.map(function(q){
     var r = quoteSlots(q, 25);
-    return { q: q, need: r.need, slots: r.slots, total: r.total };
+    return { q: q, jobHours: r.jobHours, need: r.need, slots: r.slots, total: r.total };
   }).sort(function(a, b){ return (a.q.appr || '').localeCompare(b.q.appr || ''); });
 
   var totalValue = list.reduce(function(s, q){ return s + (+q.amt || 0); }, 0);
-  var totalHours = rows.reduce(function(s, r){ return s + r.need; }, 0);
+  var totalHours = rows.reduce(function(s, r){ return s + r.jobHours; }, 0);
 
   var body = rows.map(function(r){
     var q = r.q;
@@ -1360,7 +1361,7 @@ function quotesHtml(){
     /* everything the booking call needs, keyed by quote number */
     qmap[q.qn] = {
       id: q.id || null, u: q.u, cl: q.cl || 'Client', qn: q.qn,
-      title: jobTitleFor(q, r.need, 1), need: r.need,
+      title: jobTitleFor(q, r.jobHours, 1), need: r.need,
       slots: r.slots.map(function(s){
         return { tech: s.tech, day: s.day, start: s.time.start, end: s.time.end };
       })
@@ -1387,8 +1388,9 @@ function quotesHtml(){
         '<div class="sub">' + esc(q.ad || '') + '</div></td>' +
       '<td class="c nbcell">' + nb + '</td>' +
       '<td class="c num">' + money(q.amt) + (q.x > 0 ? '<div class="sub xm">lights ' + money(q.x) + '</div>' : '') + '</td>' +
-      '<td class="c num need">' + hrs(r.need) + ' h' +
-        '<div class="sub ttl" title="the job title this will get in Jobber">' + esc(jobTitleFor(q, r.need, 1)) + '</div></td>' +
+      '<td class="c num need">' + hrs(r.jobHours) + ' h' +
+        '<div class="sub">books ' + hrs(r.need) + ' h</div>' +
+        '<div class="sub ttl" title="the job title this will get in Jobber">' + esc(jobTitleFor(q, r.jobHours, 1)) + '</div></td>' +
       '<td class="c">' +
         (r.slots.length
           ? '<select data-q="' + esc(q.qn) + '"><option value="">' + r.total + ' option' + (r.total===1?'':'s') + ' — pick a slot…</option>' + opts + '</select>'
@@ -1446,7 +1448,7 @@ function quotesHtml(){
 (list.length
  ? '<table><thead><tr><th>Client</th><th>Area</th><th>Value</th><th>Hours</th><th>Where it fits</th><th></th></tr></thead><tbody>' + body + '</tbody></table>'
  : '<div class="empty">No approved quotes waiting to be scheduled.</div>') +
-'<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour.<br>' +
+'<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour. The Jobber title keeps that estimate; the booked slot is one hour shorter, with a one-hour minimum.<br>' +
 '<b>Where it fits</b> shows open slots over the next <b>3 weeks</b>, soonest first. Each names the technician and a real time — crews start <b>08:30</b> (<b>' + esc(CFG.outOfTownStart || '09:00') + '</b> out of town), jobs keep <b>30 minutes</b> between them, and the time picked is the one that <b>adds the least driving</b>. Only genuine gaps are offered, so booking one moves nothing else.<br>' +
 (BOOK_URL
   ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit. You can optionally send a Shine confirmation by text, email, or both when the customer has a matching GHL contact.'
