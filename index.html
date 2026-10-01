@@ -1552,6 +1552,26 @@ function forceSync(){
     });
 }
 
+function watchForJobberUpdates(){
+  if (!API || !DATA || !DATA.syncedAt) return;
+  var loadedAt = DATA.syncedAt;
+  var reloading = false;
+  setInterval(function(){
+    if (reloading || document.visibilityState === 'hidden') return;
+    var statusUrl = new URL(API, location.href);
+    statusUrl.searchParams.set('format', 'status');
+    fetch(statusUrl.toString())
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(status){
+        if (!status || !status.syncedAt || status.syncedAt === loadedAt) return;
+        reloading = true;
+        setSaveState('Jobber changed — updating…', 'busy');
+        setTimeout(function(){ location.reload(); }, 500);
+      })
+      .catch(function(){});
+  }, 30000);
+}
+
 /* ---------------- roster manager ---------------------------------------- */
 function renderRoster(){
   var today = ymd(new Date());
@@ -1859,6 +1879,7 @@ function boot(data){
 
   if (!CFG.start) CFG.start = ymd(mondayOf(new Date()));
   render();
+  watchForJobberUpdates();
 }
 
 (function(){
