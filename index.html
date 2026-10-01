@@ -99,6 +99,11 @@
                  text-transform:uppercase; letter-spacing:.5px; color:#9fb6cc; text-align:right}
   thead tr.r3 th.hrs-h{border-left:2px solid var(--navy); color:#cfe1f1}
   th.tech{text-align:center; border-left:2px solid var(--navy-2)}
+  th.tech button{
+    appearance:none; border:0; background:transparent; color:inherit; font:inherit; font-weight:600;
+    cursor:pointer; padding:3px 5px; border-radius:5px;
+  }
+  th.tech button:hover,th.tech button:focus-visible{background:rgba(255,255,255,.14); outline:none}
   th.date-h{text-align:left; left:0; z-index:40; min-width:170px}
   td.date{
     position:sticky; left:0; background:var(--card); z-index:20; text-align:right;
@@ -108,6 +113,10 @@
   td.hrs{background:var(--hrs-bg); border-left:2px solid var(--line)}
   td.off{background:#c9d2db; color:#c9d2db}      /* not a working day for this tech */
   td.off.hrs{background:#bfc9d3}
+  /* leave is a scheduling block. Existing Jobber work remains visible so the
+     planner never hides booked hours or revenue. */
+  td.leave{background:repeating-linear-gradient(135deg,#f2ecfb 0 5px,#e8def8 5px 10px); color:#68438b; font-weight:700}
+  td.leave.hrs{background:repeating-linear-gradient(135deg,#ece3f8 0 5px,#dfd2f1 5px 10px)}
   /* before a tech started / after they left — hatched so it reads as "not here" */
   td.notemp{
     background:repeating-linear-gradient(135deg,#eef2f7 0 5px,#e2e8f0 5px 10px);
@@ -337,6 +346,7 @@
     <span><span class="swatch" style="background:#fdecea;border-color:#f0b6ae"></span><b style="color:var(--over-ink)">red</b> = under target</span>
     <span><span class="swatch" style="background:var(--route)"></span>drive time too long</span>
     <span><span class="swatch" style="background:#f0e9ff"></span>booked on day off</span>
+    <span><span class="swatch" style="background:repeating-linear-gradient(135deg,#f2ecfb 0 3px,#e8def8 3px 6px)"></span>on leave</span>
     <span><span class="swatch" style="background:repeating-linear-gradient(135deg,#eef2f7 0 3px,#e2e8f0 3px 6px)"></span>not employed yet / left</span>
   </div>
 </div>
@@ -369,6 +379,22 @@
         find their column. They'll show from the start date onward.
       </div>
     </div>
+  </div>
+</div>
+<div class="modal" id="leaveModal">
+  <div class="dhead">
+    <div style="flex:1"><h3 id="leaveTitle">Leave</h3>
+      <div class="sub">Blocked from quote scheduling for the selected dates</div></div>
+    <button class="btn" id="leaveClose">Close</button>
+  </div>
+  <div class="mbody" style="padding:18px">
+    <div class="addrow">
+      <input type="date" id="leaveFrom" aria-label="Leave start date">
+      <input type="date" id="leaveTo" aria-label="Leave end date">
+      <button id="leaveAdd">Add leave</button>
+    </div>
+    <div class="hint" style="margin:8px 0 14px">Both the first and last dates are included.</div>
+    <table class="rtable" id="leaveTable"></table>
   </div>
 </div>
 <div class="drawer" id="drawer">
@@ -458,6 +484,13 @@ function activeOn(name, day){
   if (r.start && day < r.start) return false;
   if (r.end && day > r.end) return false;
   return true;
+}
+function leavePeriods(name){
+  var leave = rosterOf(name).leave;
+  return Array.isArray(leave) ? leave.filter(function(p){ return p && p.from && p.to && p.from <= p.to; }) : [];
+}
+function onLeave(name, day){
+  return leavePeriods(name).some(function(p){ return day >= p.from && day <= p.to; });
 }
 /* does this tech overlap the visible window at all? */
 function activeInRange(name, firstDay, lastDay){
@@ -816,7 +849,9 @@ function render(){
   /* --- header: name row + working-days row --- */
   h += '<thead><tr class="r1"><th class="date-h">Date</th>';
   techs.forEach(function(n){
-    h += '<th class="tech" colspan="2">' + esc(n) + '</th>';
+    h += '<th class="tech" colspan="2">' + (n === OTHER
+      ? esc(n)
+      : '<button class="leave-tech" data-tech="' + esc(n) + '" title="Manage leave dates for ' + esc(n) + '">' + esc(n) + '</button>') + '</th>';
   });
   h += '<th class="tech" colspan="2">TOTAL</th></tr>';
 
@@ -879,7 +914,9 @@ function render(){
          NUMBER COLOUR = hours against this location's target (red = short)
          HIGHLIGHT     = route efficiency (orange = a day that drives too far) */
       var c = '';
-      if (!employed) c = ' notemp';
+      var leave = n !== OTHER && onLeave(n, day);
+      if (leave) c = ' leave';
+      else if (!employed) c = ' notemp';
       else if (!working && hh === 0) c = ' off';
       else if (!working && hh > 0) c = ' conflict';
       else if (n !== OTHER && targetFor(n) > 0 && hh < targetFor(n)) c = ' under';
@@ -892,7 +929,7 @@ function render(){
       var click = hh > 0 ? ' clickable" data-tech="' + esc(n) + '" data-day="' + day + '"' : '"';
 
       var blank = (c === ' off' || c === ' notemp');
-      h += '<td class="num hrs' + c + click + '>' + (hh ? hrs(hh) : (blank?'':'·')) + '</td>';
+      h += '<td class="num hrs' + c + click + '>' + (hh ? hrs(hh) : (leave ? 'Leave' : (blank?'':'·'))) + '</td>';
       h += '<td class="num' + c + click + '>' + (mm ? money(mm) : '') + '</td>';
     });
     wkTotH += dayH; wkTotM += dayM;
@@ -917,6 +954,9 @@ function render(){
   /* wire up */
   Array.prototype.forEach.call(t.querySelectorAll('.dow'), function(b){
     b.addEventListener('click', function(e){ openDow(b, b.getAttribute('data-tech')); e.stopPropagation(); });
+  });
+  Array.prototype.forEach.call(t.querySelectorAll('.leave-tech'), function(b){
+    b.addEventListener('click', function(){ openLeave(b.getAttribute('data-tech')); });
   });
   Array.prototype.forEach.call(t.querySelectorAll('td.clickable'), function(td){
     td.addEventListener('click', function(){
@@ -1063,7 +1103,7 @@ function closeDrawer(){
   document.getElementById('backdrop').classList.remove('open');
 }
 document.getElementById('dClose').addEventListener('click', closeDrawer);
-document.getElementById('backdrop').addEventListener('click', function(){ closeDrawer(); closeRoster(); });
+document.getElementById('backdrop').addEventListener('click', function(){ closeDrawer(); closeRoster(); closeLeave(); });
 
 /* ---------------- approved quotes waiting to be scheduled ----------------
    Jobber marks a quote "converted" once it becomes a job, so anything still
@@ -1234,6 +1274,7 @@ function quoteSlots(q, limit){
     var dowIdx = (parseYmd(day).getDay() + 6) % 7;
     techs.forEach(function(n){
       if (!activeOn(n, day)) return;
+      if (onLeave(n, day)) return;
       if (dowsOf(n).indexOf(dowIdx) < 0) return;
       var cell = g[n] && g[n][day];
       var booked = cell ? cell.h : 0;
@@ -1589,8 +1630,60 @@ function closeRoster(){
   document.getElementById('roster').classList.remove('open');
   document.getElementById('backdrop').classList.remove('open');
 }
+var leaveTech = null;
+function renderLeave(){
+  var periods = leaveTech ? leavePeriods(leaveTech) : [];
+  var html = '<thead><tr><th>From</th><th>To</th><th></th></tr></thead><tbody>';
+  if (!periods.length) html += '<tr><td colspan="3" class="empty">No leave dates recorded.</td></tr>';
+  periods.forEach(function(p, index){
+    html += '<tr><td>' + esc(p.from) + '</td><td>' + esc(p.to) + '</td><td><button class="rbtn undo" data-leave-remove="' + index + '">Remove</button></td></tr>';
+  });
+  html += '</tbody>';
+  var table = document.getElementById('leaveTable');
+  table.innerHTML = html;
+  Array.prototype.forEach.call(table.querySelectorAll('[data-leave-remove]'), function(button){
+    button.addEventListener('click', function(){
+      var leave = leavePeriods(leaveTech);
+      leave.splice(+button.getAttribute('data-leave-remove'), 1);
+      if (!ROSTER[leaveTech]) ROSTER[leaveTech] = {};
+      if (leave.length) ROSTER[leaveTech].leave = leave; else delete ROSTER[leaveTech].leave;
+      saveRoster(); renderLeave(); render();
+    });
+  });
+}
+function openLeave(name){
+  leaveTech = name;
+  var today = ymd(new Date());
+  document.getElementById('leaveTitle').textContent = name + ' — Leave';
+  document.getElementById('leaveFrom').value = today;
+  document.getElementById('leaveTo').value = today;
+  renderLeave();
+  document.getElementById('leaveModal').classList.add('open');
+  document.getElementById('backdrop').classList.add('open');
+}
+function closeLeave(){
+  document.getElementById('leaveModal').classList.remove('open');
+  document.getElementById('backdrop').classList.remove('open');
+  leaveTech = null;
+}
 document.getElementById('rosterBtn').addEventListener('click', openRoster);
 document.getElementById('rClose').addEventListener('click', closeRoster);
+document.getElementById('leaveClose').addEventListener('click', closeLeave);
+document.getElementById('leaveAdd').addEventListener('click', function(){
+  if (!leaveTech) return;
+  var from = document.getElementById('leaveFrom').value;
+  var to = document.getElementById('leaveTo').value;
+  if (!from || !to || from > to) {
+    setSaveState('choose a valid leave date range', 'bad');
+    return;
+  }
+  if (!ROSTER[leaveTech]) ROSTER[leaveTech] = {};
+  var leave = leavePeriods(leaveTech);
+  leave.push({ from: from, to: to });
+  leave.sort(function(a, b){ return a.from < b.from ? -1 : (a.from > b.from ? 1 : a.to.localeCompare(b.to)); });
+  ROSTER[leaveTech].leave = leave;
+  saveRoster(); renderLeave(); render();
+});
 document.getElementById('aAdd').addEventListener('click', function(){
   var nm = document.getElementById('aName').value.trim();
   if (!nm) { document.getElementById('aName').focus(); return; }
