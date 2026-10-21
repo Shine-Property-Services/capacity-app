@@ -834,10 +834,6 @@ function cleanDows(days){
   });
   return out.sort(function(a,b){ return a-b; });
 }
-function sameDows(a, b){
-  a = cleanDows(a); b = cleanDows(b);
-  return a.length === b.length && a.every(function(day, index){ return day === b[index]; });
-}
 function dowPlan(name){
   var value = DOW[name];
   if (Array.isArray(value)) return { base: cleanDows(value), changes: [] };
@@ -888,8 +884,11 @@ function dowsLabel(days){
   return days.length ? days.map(function(i){ return DOWS_S[i]; }).join(' ') : '—';
 }
 function dowsHeaderLabel(name, firstDay, lastDay){
-  var first = dowsOf(name, firstDay), last = dowsOf(name, lastDay);
-  return sameDows(first, last) ? dowsLabel(first) : 'Changes';
+  var plan = dowPlan(name);
+  var changesInRange = plan && plan.changes.some(function(change){
+    return change.from >= firstDay && change.from <= lastDay;
+  });
+  return changesInRange ? 'Changes' : dowsLabel(dowsOf(name, firstDay));
 }
 
 /* ---------------- render ------------------------------------------------ */
