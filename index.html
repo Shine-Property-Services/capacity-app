@@ -824,9 +824,72 @@ function detectDows(name){
   if (!on.length) on = [0,1,2,3,4];
   return on;
 }
-function dowsOf(name){
-  if (!DOW[name]) { DOW[name] = detectDows(name); }
-  return DOW[name];
+function cleanDows(days){
+  var seen = {}, out = [];
+  (Array.isArray(days) ? days : []).forEach(function(day){
+    day = +day;
+    if (day >= 0 && day < 7 && day === Math.floor(day) && !seen[day]) {
+      seen[day] = true; out.push(day);
+    }
+  });
+  return out.sort(function(a,b){ return a-b; });
+}
+function sameDows(a, b){
+  a = cleanDows(a); b = cleanDows(b);
+  return a.length === b.length && a.every(function(day, index){ return day === b[index]; });
+}
+function dowPlan(name){
+  var value = DOW[name];
+  if (Array.isArray(value)) return { base: cleanDows(value), changes: [] };
+  if (!value || typeof value !== 'object') return null;
+  var changes = (Array.isArray(value.changes) ? value.changes : []).filter(function(change){
+    return change && /^\d{4}-\d{2}-\d{2}$/.test(change.from || '');
+  }).map(function(change){
+    return { from: change.from, days: cleanDows(change.days) };
+  }).sort(function(a,b){ return a.from.localeCompare(b.from); });
+  return { base: cleanDows(value.base !== undefined ? value.base : value.days), changes: changes };
+}
+function dowChanges(name){
+  var plan = dowPlan(name);
+  return plan ? plan.changes.slice() : [];
+}
+function dowsOf(name, day){
+  var plan = dowPlan(name);
+  if (!plan) {
+    var inferred = detectDows(name);
+    DOW[name] = inferred;
+    return inferred.slice();
+  }
+  var on = plan.base;
+  if (day) plan.changes.forEach(function(change){
+    if (change.from <= day) on = change.days;
+  });
+  return on.slice();
+}
+function setDowsFrom(name, from, days){
+  var plan = dowPlan(name) || { base: cleanDows(detectDows(name)), changes: [] };
+  var next = cleanDows(days), found = false;
+  plan.changes = plan.changes.map(function(change){
+    if (change.from !== from) return change;
+    found = true;
+    return { from: from, days: next };
+  });
+  if (!found) plan.changes.push({ from: from, days: next });
+  plan.changes.sort(function(a,b){ return a.from.localeCompare(b.from); });
+  DOW[name] = plan;
+}
+function removeDowsFrom(name, from){
+  var plan = dowPlan(name);
+  if (!plan) return;
+  plan.changes = plan.changes.filter(function(change){ return change.from !== from; });
+  DOW[name] = plan.changes.length ? plan : plan.base;
+}
+function dowsLabel(days){
+  return days.length ? days.map(function(i){ return DOWS_S[i]; }).join(' ') : '—';
+}
+function dowsHeaderLabel(name, firstDay, lastDay){
+  var first = dowsOf(name, firstDay), last = dowsOf(name, lastDay);
+  return sameDows(first, last) ? dowsLabel(first) : 'Changes';
 }
 
 /* ---------------- render ------------------------------------------------ */
@@ -862,10 +925,9 @@ function render(){
     if (n === OTHER) {
       h += '<th colspan="2" style="border-left:2px solid var(--navy)"><span class="cap">no truck assigned</span></th>';
     } else {
-      var on = dowsOf(n);
-      var lbl = on.length ? on.map(function(i){ return DOWS_S[i]; }).join(' ') : '—';
+      var lbl = dowsHeaderLabel(n, days[0], days[days.length-1]);
       h += '<th colspan="2" style="border-left:2px solid var(--navy)">' +
-           '<button class="dow" data-tech="' + esc(n) + '">' + lbl + ' ▾</button></th>';
+           '<button class="dow" data-tech="' + esc(n) + '" title="Set dated working-day schedules">' + lbl + ' ▾</button></th>';
     }
   });
   h += '<th colspan="2" style="border-left:2px solid var(--navy)"><span class="cap">all techs</span></th></tr>';
@@ -911,7 +973,7 @@ function render(){
       wkH[n] = (wkH[n]||0) + hh; wkM[n] = (wkM[n]||0) + mm;
 
       var employed = (n === OTHER) || activeOn(n, day);
-      var working = employed && ((n === OTHER) || dowsOf(n).indexOf(dowIdx) >= 0);
+      var working = employed && ((n === OTHER) || dowsOf(n, day).indexOf(dowIdx) >= 0);
       /* two independent signals:
          NUMBER COLOUR = hours against this location's target (red = short)
          HIGHLIGHT     = route efficiency (orange = a day that drives too far) */
@@ -976,12 +1038,22 @@ function esc(s){
 /* ---------------- working-days popover ---------------------------------- */
 function openDow(anchor, tech){
   var pop = document.getElementById('dowPop');
-  var on = dowsOf(tech);
+  var from = arguments.length > 2 && arguments[2] ? arguments[2] : ymd(new Date());
+  var on = dowsOf(tech, from);
+  var changes = dowChanges(tech);
   var html = '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;padding:2px 6px 6px">' + esc(tech) + '</div>';
+  html += '<label style="display:block;font-size:12px;font-weight:650;color:var(--navy);padding:3px 6px 8px">Apply this schedule from <input type="date" id="dowFrom" value="' + esc(from) + '" style="display:block;width:100%;box-sizing:border-box;margin-top:5px"></label>';
   DOWS.forEach(function(d,i){
     html += '<label><input type="checkbox" data-i="' + i + '"' + (on.indexOf(i)>=0?' checked':'') + '> ' + d + '</label>';
   });
   html += '<div class="pf"><button data-set="week">Mon–Fri</button><button data-set="all">All</button><button data-set="none">None</button></div>';
+  html += '<div style="font-size:11.5px;color:var(--muted);padding:5px 6px 1px">Dates before this keep their previous schedule.</div>';
+  if (changes.length) {
+    html += '<div style="border-top:1px solid var(--line);margin-top:8px;padding:8px 6px 1px;font-size:11.5px;color:var(--muted)">Scheduled changes</div>';
+    changes.forEach(function(change){
+      html += '<div style="display:flex;gap:6px;align-items:center;padding:3px 6px;font-size:12px"><span style="flex:1">' + esc(change.from) + ' · ' + esc(dowsLabel(change.days)) + '</span><button data-remove-from="' + esc(change.from) + '" style="border:0;background:none;color:var(--red);cursor:pointer;font:inherit">Remove</button></div>';
+    });
+  }
   pop.innerHTML = html;
 
   var r = anchor.getBoundingClientRect();
@@ -989,24 +1061,37 @@ function openDow(anchor, tech){
   pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
   pop.classList.add('open');
 
-  Array.prototype.forEach.call(pop.querySelectorAll('input'), function(cb){
+  function effectiveFrom(){ return document.getElementById('dowFrom').value || ymd(new Date()); }
+  function reopen(date){
+    var btn = document.querySelector('.dow[data-tech="' + tech.replace(/"/g,'\\"') + '"]');
+    if (btn) openDow(btn, tech, date);
+  }
+  document.getElementById('dowFrom').addEventListener('change', function(){
+    reopen(effectiveFrom());
+  });
+  Array.prototype.forEach.call(pop.querySelectorAll('input[type=checkbox]'), function(cb){
     cb.addEventListener('change', function(){
       var i = +cb.getAttribute('data-i');
-      var cur = dowsOf(tech).slice();
+      var effective = effectiveFrom(), cur = dowsOf(tech, effective);
       var at = cur.indexOf(i);
       if (cb.checked && at < 0) cur.push(i);
       if (!cb.checked && at >= 0) cur.splice(at,1);
       cur.sort(function(a,b){ return a-b; });
-      DOW[tech] = cur; saveDow(); render();
-      var btn = document.querySelector('.dow[data-tech="' + tech.replace(/"/g,'\\"') + '"]');
-      if (btn) openDow(btn, tech);
+      setDowsFrom(tech, effective, cur); saveDow(); render(); reopen(effective);
     });
   });
   Array.prototype.forEach.call(pop.querySelectorAll('.pf button'), function(b){
     b.addEventListener('click', function(){
       var v = b.getAttribute('data-set');
-      DOW[tech] = v === 'week' ? [0,1,2,3,4] : (v === 'all' ? [0,1,2,3,4,5,6] : []);
-      saveDow(); render(); pop.classList.remove('open');
+      var effective = effectiveFrom();
+      setDowsFrom(tech, effective, v === 'week' ? [0,1,2,3,4] : (v === 'all' ? [0,1,2,3,4,5,6] : []));
+      saveDow(); render(); reopen(effective);
+    });
+  });
+  Array.prototype.forEach.call(pop.querySelectorAll('[data-remove-from]'), function(button){
+    button.addEventListener('click', function(){
+      var removed = button.getAttribute('data-remove-from');
+      removeDowsFrom(tech, removed); saveDow(); render(); reopen(from === removed ? ymd(new Date()) : from);
     });
   });
 }
@@ -1325,7 +1410,7 @@ function quoteSlots(q, limit){
     techs.forEach(function(n){
       if (!activeOn(n, day)) return;
       if (onLeave(n, day)) return;
-      if (dowsOf(n).indexOf(dowIdx) < 0) return;
+      if (dowsOf(n, day).indexOf(dowIdx) < 0) return;
       var cell = g[n] && g[n][day];
       var booked = cell ? cell.h : 0;
       var target = targetFor(n);
