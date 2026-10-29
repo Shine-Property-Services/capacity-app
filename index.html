@@ -1272,6 +1272,7 @@ var DAY_START_MIN = 8 * 60 + 30;       // 08:30 in town
 var GAP_MIN = 30;                      // required break between jobs
 var DAY_END_MIN = 18 * 60;             // don't start work that runs past 18:00
 var QUOTE_HORIZON_DAYS = 21;           // only suggest slots 3 weeks out
+var MAX_QUOTE_DRIVE_MIN = 25;
 /* Out-of-town work starts later to allow the drive. Around Prince George the
    neighbourhood map already tells us — an address with no area code is outside
    the city. Victoria has no map, so those communities are listed by name. */
@@ -1335,10 +1336,13 @@ function bestTimeFor(quote, unit, tech, day, need){
     var endMin = startMin + mins;
     if (endMin > DAY_END_MIN) return;
     if (next && endMin + GAP_MIN > next.s) return;      // would run into the next job
+    var prevDrive = prev ? driveBetween(prev, q) : 0;
+    var nextDrive = next ? driveBetween(q, next) : 0;
+    if (prevDrive > MAX_QUOTE_DRIVE_MIN || nextDrive > MAX_QUOTE_DRIVE_MIN) return;
     var added = 0;
-    if (prev && next) added = driveBetween(prev, q) + driveBetween(q, next) - driveBetween(prev, next);
-    else if (prev) added = driveBetween(prev, q);
-    else if (next) added = driveBetween(q, next);
+    if (prev && next) added = prevDrive + nextDrive - driveBetween(prev, next);
+    else if (prev) added = prevDrive;
+    else if (next) added = nextDrive;
     if (!best || added < best.added - 0.01 || (Math.abs(added - best.added) < 0.01 && startMin < best.startMin)) {
       best = { startMin: startMin, endMin: endMin, added: added, prev: prev, next: next };
     }
@@ -1482,7 +1486,7 @@ function quotesHtml(){
       return '<option value="' + esc(val) + '"' + (plan[q.qn] === val ? ' selected' : '') + '>' + esc(lbl) + '</option>';
     }).join('');
     var none = !r.slots.length
-      ? '<div class="nofit">No day has ' + hrs(r.need) + ' h free — raise the target, add a tech, or split the job.</div>'
+      ? '<div class="nofit">No suitable slot has ' + hrs(r.need) + ' h free within the ' + MAX_QUOTE_DRIVE_MIN + ' min drive limit.</div>'
       : '';
     return '<tr>' +
       '<td class="c"><div class="cl">' + esc(q.cl || 'Client') + '</div>' +
@@ -1528,7 +1532,6 @@ function quotesHtml(){
 '.empty{padding:40px;text-align:center;color:#61748a}' +
 '.note{margin:16px 0 0;font-size:12px;color:#61748a;line-height:1.6}' +
 '.picked.done{color:#0b7a55}.picked.done a{margin-left:4px}' +
-'.cok{color:#0b7a55;font-weight:600}.cwarn{color:#a35a00;font-weight:600}' +
 '#cfm{position:fixed;inset:0;background:rgba(1,53,93,.45);display:none;align-items:center;justify-content:center;z-index:50}' +
 '#cfm.on{display:flex}' +
 '#cfm .box{background:#fff;border-radius:12px;padding:22px 24px;width:min(460px,92vw);box-shadow:0 24px 60px rgba(1,53,93,.35)}' +
@@ -1541,7 +1544,6 @@ function quotesHtml(){
 '#cfm button{border-radius:8px;padding:9px 18px;font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid #dbe3ec;background:#fff;color:#61748a}' +
 '#cfmYes{background:#01355d;border-color:#01355d;color:#fff}#cfmYes:disabled{opacity:.6;cursor:default}' +
 '#cfmErr{color:#b3251a;font-size:12.5px;margin-top:10px;min-height:1em}' +
-'#cfm .send{margin-top:16px;padding:11px 12px;border:1px solid #dbe3ec;border-radius:8px;background:#f8fbfd;font-size:12.5px;color:#12212e}#cfm .send b{display:block;margin-bottom:6px;color:#01355d}#cfm .send label{margin-right:14px;white-space:nowrap}' +
 '</style></head><body>' +
 '<header><h1>Approved quotes <span>to schedule</span></h1>' +
 '<div class="meta">' + list.length + ' quote' + (list.length===1?'':'s') + ' · ' + money(totalValue) +
@@ -1551,7 +1553,7 @@ function quotesHtml(){
  ? '<table><thead><tr><th>Client</th><th>Area</th><th>Value</th><th>Hours</th><th>Where it fits</th><th></th></tr></thead><tbody>' + body + '</tbody></table>'
  : '<div class="empty">No approved quotes waiting to be scheduled.</div>') +
 '<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour. The Jobber title keeps that estimate; the booked slot is one hour shorter, with a one-hour minimum.<br>' +
-'<b>Where it fits</b> shows open slots over the next <b>3 weeks</b>, soonest first. Each names the technician and a real time — crews start <b>08:30</b> (<b>' + esc(CFG.outOfTownStart || '09:00') + '</b> out of town), jobs keep <b>30 minutes</b> between them, and the time picked is the one that <b>adds the least driving</b>. Only genuine gaps are offered, so booking one moves nothing else.<br>' +
+'<b>Where it fits</b> shows open slots over the next <b>3 weeks</b>, soonest first. Each names the technician and a real time — crews start <b>08:30</b> (<b>' + esc(CFG.outOfTownStart || '09:00') + '</b> out of town), jobs keep <b>30 minutes</b> between them, and every neighboring drive must be <b>' + MAX_QUOTE_DRIVE_MIN + ' minutes or less</b>. Only genuine gaps are offered, so booking one moves nothing else.<br>' +
 (BOOK_URL
   ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit.'
   : 'Picking a slot is a note to yourself; booking needs the hosted app.') + '</p>' +
