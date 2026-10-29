@@ -1553,7 +1553,7 @@ function quotesHtml(){
 '<p class="note"><b>Hours</b> use the same rules as the planner — subtotal before discounts, Christmas lights at their own rate, rounded down to the half hour. The Jobber title keeps that estimate; the booked slot is one hour shorter, with a one-hour minimum.<br>' +
 '<b>Where it fits</b> shows open slots over the next <b>3 weeks</b>, soonest first. Each names the technician and a real time — crews start <b>08:30</b> (<b>' + esc(CFG.outOfTownStart || '09:00') + '</b> out of town), jobs keep <b>30 minutes</b> between them, and the time picked is the one that <b>adds the least driving</b>. Only genuine gaps are offered, so booking one moves nothing else.<br>' +
 (BOOK_URL
-  ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit. You can optionally send a Shine confirmation by text, email, or both when the customer has a matching GHL contact.'
+  ? 'Choosing a slot asks you to confirm, then <b>creates the job in Jobber</b> — converting the quote, assigning the technician and booking the visit.'
   : 'Picking a slot is a note to yourself; booking needs the hosted app.') + '</p>' +
 '</div>' +
 '<div id="cfm"><div class="box"><h3>Book this job?</h3><div id="cfmBody"></div>' +
@@ -1572,7 +1572,6 @@ function quotesHtml(){
 '"<dt>Technician</dt><dd>"+slot.tech+"</dd>"+' +
 '"<dt>When</dt><dd>"+slot.day+" &middot; "+slot.start+"–"+slot.end+"</dd>"+' +
 '"<dt>Job title</dt><dd><code>"+q.title+"</code></dd></dl>"+' +
-'"<div class=\\"send\\"><b>Send Shine confirmation after booking</b><label><input type=\\"checkbox\\" id=\\"cfmSms\\"> Text message</label><label><input type=\\"checkbox\\" id=\\"cfmEmail\\"> Email</label></div>";' +
 'document.getElementById("cfmErr").textContent="";' +
 'document.getElementById("cfmYes").disabled=false;' +
 'document.getElementById("cfmYes").textContent="Book in Jobber";' +
@@ -1594,7 +1593,7 @@ function quotesHtml(){
 'var b=this;b.disabled=true;b.textContent="Booking…";' +
 'var q=pend.q,slot=pend.slot,sel=pend.sel;' +
 'fetch(BOOK_URL,{method:"POST",headers:{"Content-Type":"application/json"},' +
-'body:JSON.stringify({unit:q.u,quoteId:q.id,tech:slot.tech,day:slot.day,start:slot.start,end:slot.end,title:q.title,messageChannels:{sms:document.getElementById("cfmSms").checked,email:document.getElementById("cfmEmail").checked}})})' +
+'body:JSON.stringify({unit:q.u,quoteId:q.id,tech:slot.tech,day:slot.day,start:slot.start,end:slot.end,title:q.title})})' +
 '.then(function(r){return r.json()})' +
 '.then(function(res){' +
 'if(!res.ok){b.disabled=false;b.textContent="Book in Jobber";' +
@@ -1602,11 +1601,8 @@ function quotesHtml(){
 'document.getElementById("cfm").classList.remove("on");' +
 'var cell=document.getElementById("p-"+q.qn);' +
 'cell.className="picked done";' +
-'var confirmations=res.confirmations||{},delivery=[];' +
-'["sms","email"].forEach(function(channel){var item=confirmations[channel];if(!item)return;var label=channel==="sms"?"Text":"Email",state=item.status==="sent"?"confirmation queued":(item.status==="skipped"?"confirmation skipped":"confirmation failed");delivery.push("<span class=\\""+(item.status==="sent"?"cok":"cwarn")+"\\">"+label+" "+state+"</span>")});' +
 'cell.innerHTML="Booked as job #"+res.jobNumber+" — "+slot.tech+", "+slot.day+" "+slot.start+"–"+slot.end+' +
-'(res.url?" &middot; <a href=\\""+res.url+"\\" target=\\"_blank\\" rel=\\"noopener\\">open in Jobber ↗</a>":"")+' +
-'(delivery.length?"<br>"+delivery.join("<br>"):"");' +
+'(res.url?" &middot; <a href=\\""+res.url+"\\" target=\\"_blank\\" rel=\\"noopener\\">open in Jobber ↗</a>":"");' +
 'if(sel){sel.disabled=true;sel.style.display="none"}' +
 'pend=null;' +
 '}).catch(function(err){b.disabled=false;b.textContent="Book in Jobber";' +
